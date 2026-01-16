@@ -146,125 +146,78 @@ func (r *GarageBucketReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *GarageBucketReconciler) reconcileBucket(ctx context.Context, bucket *garagev1alpha1.GarageBucket, garageClient *garage.Client) error {
 	log := logf.FromContext(ctx)
 
-	// Determine the alias to use
 	alias := bucket.Name
 	if bucket.Spec.GlobalAlias != "" {
 		alias = bucket.Spec.GlobalAlias
 	}
 
-	// Check if bucket exists
-	var existingBucket *garage.Bucket
+	existingBucket, err := r.getOrCreateBucket(ctx, bucket, garageClient, alias)
+	if err != nil {
+		return err
+	}
+
+	if err := r.updateBucketSettings(ctx, bucket, garageClient, existingBucket); err != nil {
+		return err
+	}
+
+	if err := r.reconcileKeyPermissions(ctx, bucket, garageClient, existingBucket.ID); err != nil {
+		return err
+	}
+
+	if err := r.reconcileLocalAliases(ctx, bucket, garageClient, existingBucket.ID); err != nil {
+		return err
+	}
+
+	log.V(1).Info("Bucket reconciled successfully", "bucketID", existingBucket.ID)
+	return nil
+}
+
+func (r *GarageBucketReconciler) getOrCreateBucket(ctx context.Context, bucket *garagev1alpha1.GarageBucket, garageClient *garage.Client, alias string) (*garage.Bucket, error) {
+	log := logf.FromContext(ctx)
+
 	if bucket.Status.BucketID != "" {
 		existing, err := garageClient.GetBucket(ctx, garage.GetBucketRequest{ID: bucket.Status.BucketID})
 		if err == nil {
-			existingBucket = existing
+			return existing, nil
 		}
 	}
 
-	if existingBucket == nil {
-		// Try to find by alias
-		existing, err := garageClient.GetBucket(ctx, garage.GetBucketRequest{GlobalAlias: alias})
-		if err == nil {
-			existingBucket = existing
-		}
+	existing, err := garageClient.GetBucket(ctx, garage.GetBucketRequest{GlobalAlias: alias})
+	if err == nil {
+		bucket.Status.BucketID = existing.ID
+		return existing, nil
 	}
 
-	// Create bucket if it doesn't exist
-	if existingBucket == nil {
-		log.Info("Creating bucket", "alias", alias)
-		created, err := garageClient.CreateBucket(ctx, garage.CreateBucketRequest{
-			GlobalAlias: alias,
-		})
-		if err != nil {
-			// Handle 409 Conflict - bucket may have been created by another controller
-			if garage.IsConflict(err) {
-				log.Info("Bucket creation conflict, checking if it was created by another controller", "alias", alias)
-				existing, getErr := garageClient.GetBucket(ctx, garage.GetBucketRequest{GlobalAlias: alias})
-				if getErr != nil {
-					return fmt.Errorf("failed to create bucket (conflict) and failed to get existing bucket: %w (original: %v)", getErr, err)
-				}
-				existingBucket = existing
-				bucket.Status.BucketID = existing.ID
-			} else {
-				return fmt.Errorf("failed to create bucket: %w", err)
+	log.Info("Creating bucket", "alias", alias)
+	created, err := garageClient.CreateBucket(ctx, garage.CreateBucketRequest{GlobalAlias: alias})
+	if err != nil {
+		if garage.IsConflict(err) {
+			log.Info("Bucket creation conflict, checking if it was created by another controller", "alias", alias)
+			existing, getErr := garageClient.GetBucket(ctx, garage.GetBucketRequest{GlobalAlias: alias})
+			if getErr != nil {
+				return nil, fmt.Errorf("failed to create bucket (conflict) and failed to get existing bucket: %w (original: %v)", getErr, err)
 			}
-		} else {
-			existingBucket = created
-			bucket.Status.BucketID = created.ID
+			bucket.Status.BucketID = existing.ID
+			return existing, nil
 		}
+		return nil, fmt.Errorf("failed to create bucket: %w", err)
 	}
+	bucket.Status.BucketID = created.ID
+	return created, nil
+}
 
-	// Update bucket settings
+func (r *GarageBucketReconciler) updateBucketSettings(ctx context.Context, bucket *garagev1alpha1.GarageBucket, garageClient *garage.Client, existingBucket *garage.Bucket) error {
 	updateReq := garage.UpdateBucketRequest{ID: existingBucket.ID}
 	needsUpdate := false
 
-	// Website configuration
-	if bucket.Spec.Website != nil {
-		// Garage requires indexDocument when enabling website access
-		indexDoc := bucket.Spec.Website.IndexDocument
-		if bucket.Spec.Website.Enabled && indexDoc == "" {
-			indexDoc = "index.html" // Default per kubebuilder annotation
-		}
-
-		// Only update if website config actually changed
-		currentEnabled := existingBucket.WebsiteAccess
-		currentIndex := ""
-		currentError := ""
-		if existingBucket.WebsiteConfig != nil {
-			currentIndex = existingBucket.WebsiteConfig.IndexDocument
-			currentError = existingBucket.WebsiteConfig.ErrorDocument
-		}
-
-		if bucket.Spec.Website.Enabled != currentEnabled ||
-			(bucket.Spec.Website.Enabled && (indexDoc != currentIndex || bucket.Spec.Website.ErrorDocument != currentError)) {
-			updateReq.Body.WebsiteAccess = &garage.UpdateBucketWebsiteAccess{
-				Enabled:       bucket.Spec.Website.Enabled,
-				IndexDocument: indexDoc,
-				ErrorDocument: bucket.Spec.Website.ErrorDocument,
-			}
-			needsUpdate = true
-		}
+	if websiteAccess := buildWebsiteAccess(bucket.Spec.Website, existingBucket); websiteAccess != nil {
+		updateReq.Body.WebsiteAccess = websiteAccess
+		needsUpdate = true
 	}
 
-	// Quotas - only update if values actually changed
-	if bucket.Spec.Quotas != nil {
-		currentQuotas := existingBucket.Quotas
-		var desiredMaxSize, desiredMaxObjects *uint64
-
-		if bucket.Spec.Quotas.MaxSize != nil {
-			maxSize := uint64(bucket.Spec.Quotas.MaxSize.Value())
-			desiredMaxSize = &maxSize
-		}
-		if bucket.Spec.Quotas.MaxObjects != nil {
-			maxObjects := uint64(*bucket.Spec.Quotas.MaxObjects)
-			desiredMaxObjects = &maxObjects
-		}
-
-		quotasChanged := false
-		if currentQuotas == nil {
-			quotasChanged = desiredMaxSize != nil || desiredMaxObjects != nil
-		} else {
-			// Compare max size
-			if (desiredMaxSize == nil) != (currentQuotas.MaxSize == nil) {
-				quotasChanged = true
-			} else if desiredMaxSize != nil && currentQuotas.MaxSize != nil && *desiredMaxSize != *currentQuotas.MaxSize {
-				quotasChanged = true
-			}
-			// Compare max objects
-			if (desiredMaxObjects == nil) != (currentQuotas.MaxObjects == nil) {
-				quotasChanged = true
-			} else if desiredMaxObjects != nil && currentQuotas.MaxObjects != nil && *desiredMaxObjects != *currentQuotas.MaxObjects {
-				quotasChanged = true
-			}
-		}
-
-		if quotasChanged {
-			updateReq.Body.Quotas = &garage.BucketQuotas{
-				MaxSize:    desiredMaxSize,
-				MaxObjects: desiredMaxObjects,
-			}
-			needsUpdate = true
-		}
+	if quotas := buildQuotasUpdate(bucket.Spec.Quotas, existingBucket.Quotas); quotas != nil {
+		updateReq.Body.Quotas = quotas
+		needsUpdate = true
 	}
 
 	if needsUpdate {
@@ -272,17 +225,83 @@ func (r *GarageBucketReconciler) reconcileBucket(ctx context.Context, bucket *ga
 			return fmt.Errorf("failed to update bucket: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Handle key permissions
+func buildWebsiteAccess(spec *garagev1alpha1.WebsiteConfig, existing *garage.Bucket) *garage.UpdateBucketWebsiteAccess {
+	if spec == nil {
+		return nil
+	}
+	indexDoc := spec.IndexDocument
+	if spec.Enabled && indexDoc == "" {
+		indexDoc = "index.html"
+	}
+
+	currentIndex := ""
+	currentError := ""
+	if existing.WebsiteConfig != nil {
+		currentIndex = existing.WebsiteConfig.IndexDocument
+		currentError = existing.WebsiteConfig.ErrorDocument
+	}
+
+	if spec.Enabled != existing.WebsiteAccess ||
+		(spec.Enabled && (indexDoc != currentIndex || spec.ErrorDocument != currentError)) {
+		return &garage.UpdateBucketWebsiteAccess{
+			Enabled:       spec.Enabled,
+			IndexDocument: indexDoc,
+			ErrorDocument: spec.ErrorDocument,
+		}
+	}
+	return nil
+}
+
+func buildQuotasUpdate(spec *garagev1alpha1.BucketQuotas, current *garage.BucketQuotas) *garage.BucketQuotas {
+	if spec == nil {
+		return nil
+	}
+	var desiredMaxSize, desiredMaxObjects *uint64
+	if spec.MaxSize != nil {
+		v := uint64(spec.MaxSize.Value())
+		desiredMaxSize = &v
+	}
+	if spec.MaxObjects != nil {
+		v := uint64(*spec.MaxObjects)
+		desiredMaxObjects = &v
+	}
+
+	if !quotasChanged(current, desiredMaxSize, desiredMaxObjects) {
+		return nil
+	}
+	return &garage.BucketQuotas{MaxSize: desiredMaxSize, MaxObjects: desiredMaxObjects}
+}
+
+func quotasChanged(current *garage.BucketQuotas, desiredSize, desiredObjects *uint64) bool {
+	if current == nil {
+		return desiredSize != nil || desiredObjects != nil
+	}
+	if (desiredSize == nil) != (current.MaxSize == nil) {
+		return true
+	}
+	if desiredSize != nil && current.MaxSize != nil && *desiredSize != *current.MaxSize {
+		return true
+	}
+	if (desiredObjects == nil) != (current.MaxObjects == nil) {
+		return true
+	}
+	if desiredObjects != nil && current.MaxObjects != nil && *desiredObjects != *current.MaxObjects {
+		return true
+	}
+	return false
+}
+
+func (r *GarageBucketReconciler) reconcileKeyPermissions(ctx context.Context, bucket *garagev1alpha1.GarageBucket, garageClient *garage.Client, bucketID string) error {
+	log := logf.FromContext(ctx)
 	var permissionErrors []string
 	pendingKeys := false
+
 	for _, keyPerm := range bucket.Spec.KeyPermissions {
-		// Get the key
 		key := &garagev1alpha1.GarageKey{}
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      keyPerm.KeyRef,
-			Namespace: bucket.Namespace,
-		}, key); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Name: keyPerm.KeyRef, Namespace: bucket.Namespace}, key); err != nil {
 			if errors.IsNotFound(err) {
 				log.Info("Key not found, will retry", "keyRef", keyPerm.KeyRef)
 				pendingKeys = true
@@ -297,15 +316,10 @@ func (r *GarageBucketReconciler) reconcileBucket(ctx context.Context, bucket *ga
 			continue
 		}
 
-		// Grant permissions
 		_, err := garageClient.AllowBucketKey(ctx, garage.AllowBucketKeyRequest{
-			BucketID:    existingBucket.ID,
+			BucketID:    bucketID,
 			AccessKeyID: key.Status.AccessKeyID,
-			Permissions: garage.BucketKeyPerms{
-				Read:  keyPerm.Read,
-				Write: keyPerm.Write,
-				Owner: keyPerm.Owner,
-			},
+			Permissions: garage.BucketKeyPerms{Read: keyPerm.Read, Write: keyPerm.Write, Owner: keyPerm.Owner},
 		})
 		if err != nil {
 			log.Error(err, "Failed to set key permissions", "keyRef", keyPerm.KeyRef)
@@ -313,27 +327,23 @@ func (r *GarageBucketReconciler) reconcileBucket(ctx context.Context, bucket *ga
 		}
 	}
 
-	// If there are pending keys, return an error to requeue and retry
 	if pendingKeys {
-		log.Info("Some keys not ready, will retry permission grants")
 		return fmt.Errorf("waiting for keys to be ready before granting permissions")
 	}
-
-	// If there were permission errors, return them so status reflects the issue
 	if len(permissionErrors) > 0 {
 		return fmt.Errorf("failed to set permissions for keys: %v", permissionErrors)
 	}
+	return nil
+}
 
-	// Handle local aliases
+func (r *GarageBucketReconciler) reconcileLocalAliases(ctx context.Context, bucket *garagev1alpha1.GarageBucket, garageClient *garage.Client, bucketID string) error {
+	log := logf.FromContext(ctx)
 	var aliasErrors []string
 	pendingAliasKeys := false
+
 	for _, localAlias := range bucket.Spec.LocalAliases {
-		// Get the key
 		key := &garagev1alpha1.GarageKey{}
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      localAlias.KeyRef,
-			Namespace: bucket.Namespace,
-		}, key); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Name: localAlias.KeyRef, Namespace: bucket.Namespace}, key); err != nil {
 			if errors.IsNotFound(err) {
 				log.Info("Key for local alias not found, will retry", "keyRef", localAlias.KeyRef, "alias", localAlias.Alias)
 				pendingAliasKeys = true
@@ -348,9 +358,8 @@ func (r *GarageBucketReconciler) reconcileBucket(ctx context.Context, bucket *ga
 			continue
 		}
 
-		// Add local alias
 		_, err := garageClient.AddBucketAlias(ctx, garage.AddBucketAliasRequest{
-			BucketID:    existingBucket.ID,
+			BucketID:    bucketID,
 			LocalAlias:  localAlias.Alias,
 			AccessKeyID: key.Status.AccessKeyID,
 		})
@@ -361,14 +370,11 @@ func (r *GarageBucketReconciler) reconcileBucket(ctx context.Context, bucket *ga
 	}
 
 	if pendingAliasKeys {
-		log.Info("Some keys for local aliases not ready, will retry")
 		return fmt.Errorf("waiting for keys to be ready before creating local aliases")
 	}
-
 	if len(aliasErrors) > 0 {
 		return fmt.Errorf("failed to create local aliases: %v", aliasErrors)
 	}
-
 	return nil
 }
 

@@ -296,35 +296,51 @@ func (r *GarageClusterReconciler) reconcileConfigMap(ctx context.Context, cluste
 func (r *GarageClusterReconciler) generateGarageConfig(cluster *garagev1alpha1.GarageCluster) string {
 	var config strings.Builder
 
-	// Metadata dir
 	config.WriteString("metadata_dir = \"/data/metadata\"\n")
 	config.WriteString("data_dir = \"/data/data\"\n")
 	config.WriteString("\n")
 
-	// Database engine
+	writeDBConfig(&config, cluster)
+	writeReplicationConfig(&config, cluster)
+	writeStorageConfig(&config, cluster)
+	writeBlockConfig(&config, cluster)
+	writeSecurityConfig(&config, cluster)
+	writeRPCConfig(&config, cluster)
+	writeS3APIConfig(&config, cluster)
+	writeK2VAPIConfig(&config, cluster)
+	writeWebAPIConfig(&config, cluster)
+	writeAdminConfig(&config, cluster)
+	writeKubernetesDiscoveryConfig(&config, cluster)
+	writeConsulDiscoveryConfig(&config, cluster)
+
+	return config.String()
+}
+
+func writeDBConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
 	dbEngine := "lmdb"
 	if cluster.Spec.Database != nil && cluster.Spec.Database.Engine != "" {
 		dbEngine = cluster.Spec.Database.Engine
 	}
-	config.WriteString(fmt.Sprintf("db_engine = \"%s\"\n", dbEngine))
+	fmt.Fprintf(config, "db_engine = \"%s\"\n", dbEngine)
 
-	// Database engine-specific options
 	if cluster.Spec.Database != nil {
 		if cluster.Spec.Database.LMDBMapSize != nil {
-			config.WriteString(fmt.Sprintf("lmdb_map_size = %d\n", cluster.Spec.Database.LMDBMapSize.Value()))
+			fmt.Fprintf(config, "lmdb_map_size = %d\n", cluster.Spec.Database.LMDBMapSize.Value())
 		}
 		if cluster.Spec.Database.FjallBlockCacheSize != nil {
-			config.WriteString(fmt.Sprintf("fjall_block_cache_size = %d\n", cluster.Spec.Database.FjallBlockCacheSize.Value()))
+			fmt.Fprintf(config, "fjall_block_cache_size = %d\n", cluster.Spec.Database.FjallBlockCacheSize.Value())
 		}
 	}
+}
 
-	// Replication
-	config.WriteString(fmt.Sprintf("replication_factor = %d\n", cluster.Spec.Replication.Factor))
+func writeReplicationConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	fmt.Fprintf(config, "replication_factor = %d\n", cluster.Spec.Replication.Factor)
 	if cluster.Spec.Replication.ConsistencyMode != "" {
-		config.WriteString(fmt.Sprintf("consistency_mode = \"%s\"\n", cluster.Spec.Replication.ConsistencyMode))
+		fmt.Fprintf(config, "consistency_mode = \"%s\"\n", cluster.Spec.Replication.ConsistencyMode)
 	}
+}
 
-	// Storage fsync and snapshot options
+func writeStorageConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
 	if cluster.Spec.Storage.MetadataFsync {
 		config.WriteString("metadata_fsync = true\n")
 	}
@@ -332,250 +348,248 @@ func (r *GarageClusterReconciler) generateGarageConfig(cluster *garagev1alpha1.G
 		config.WriteString("data_fsync = true\n")
 	}
 	if cluster.Spec.Storage.MetadataSnapshotsDir != "" {
-		config.WriteString(fmt.Sprintf("metadata_snapshots_dir = \"%s\"\n", cluster.Spec.Storage.MetadataSnapshotsDir))
+		fmt.Fprintf(config, "metadata_snapshots_dir = \"%s\"\n", cluster.Spec.Storage.MetadataSnapshotsDir)
 	}
 	if cluster.Spec.Storage.MetadataAutoSnapshotInterval != "" {
-		config.WriteString(fmt.Sprintf("metadata_auto_snapshot_interval = \"%s\"\n", cluster.Spec.Storage.MetadataAutoSnapshotInterval))
+		fmt.Fprintf(config, "metadata_auto_snapshot_interval = \"%s\"\n", cluster.Spec.Storage.MetadataAutoSnapshotInterval)
 	}
+}
 
-	// Block configuration
-	if cluster.Spec.Blocks != nil {
-		if cluster.Spec.Blocks.Size != nil {
-			config.WriteString(fmt.Sprintf("block_size = %d\n", cluster.Spec.Blocks.Size.Value()))
-		}
-		if cluster.Spec.Blocks.RAMBufferMax != nil {
-			config.WriteString(fmt.Sprintf("block_ram_buffer_max = %d\n", cluster.Spec.Blocks.RAMBufferMax.Value()))
-		}
-		if cluster.Spec.Blocks.MaxConcurrentReads != nil {
-			config.WriteString(fmt.Sprintf("block_max_concurrent_reads = %d\n", *cluster.Spec.Blocks.MaxConcurrentReads))
-		}
-		if cluster.Spec.Blocks.CompressionLevel != nil {
-			// CompressionLevel can be "none" (quoted string) or a number (unquoted)
-			level := *cluster.Spec.Blocks.CompressionLevel
-			if level == "none" {
-				config.WriteString("compression_level = \"none\"\n")
-			} else {
-				config.WriteString(fmt.Sprintf("compression_level = %s\n", level))
-			}
-		}
-		if cluster.Spec.Blocks.DisableScrub {
-			config.WriteString("disable_scrub = true\n")
-		}
-		if cluster.Spec.Blocks.UseLocalTZ {
-			config.WriteString("use_local_tz = true\n")
+func writeBlockConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.Blocks == nil {
+		return
+	}
+	if cluster.Spec.Blocks.Size != nil {
+		fmt.Fprintf(config, "block_size = %d\n", cluster.Spec.Blocks.Size.Value())
+	}
+	if cluster.Spec.Blocks.RAMBufferMax != nil {
+		fmt.Fprintf(config, "block_ram_buffer_max = %d\n", cluster.Spec.Blocks.RAMBufferMax.Value())
+	}
+	if cluster.Spec.Blocks.MaxConcurrentReads != nil {
+		fmt.Fprintf(config, "block_max_concurrent_reads = %d\n", *cluster.Spec.Blocks.MaxConcurrentReads)
+	}
+	if cluster.Spec.Blocks.CompressionLevel != nil {
+		level := *cluster.Spec.Blocks.CompressionLevel
+		if level == "none" {
+			config.WriteString("compression_level = \"none\"\n")
+		} else {
+			fmt.Fprintf(config, "compression_level = %s\n", level)
 		}
 	}
-
-	// Security options
-	if cluster.Spec.Security != nil {
-		if cluster.Spec.Security.AllowWorldReadableSecrets {
-			config.WriteString("allow_world_readable_secrets = true\n")
-		}
-		if cluster.Spec.Security.AllowPunycode {
-			config.WriteString("allow_punycode = true\n")
-		}
+	if cluster.Spec.Blocks.DisableScrub {
+		config.WriteString("disable_scrub = true\n")
 	}
+	if cluster.Spec.Blocks.UseLocalTZ {
+		config.WriteString("use_local_tz = true\n")
+	}
+}
 
-	// RPC settings (top-level in Garage v1.0+)
+func writeSecurityConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.Security == nil {
+		return
+	}
+	if cluster.Spec.Security.AllowWorldReadableSecrets {
+		config.WriteString("allow_world_readable_secrets = true\n")
+	}
+	if cluster.Spec.Security.AllowPunycode {
+		config.WriteString("allow_punycode = true\n")
+	}
+}
+
+func writeRPCConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
 	rpcPort := int32(3901)
 	if cluster.Spec.Network.RPCBindPort != 0 {
 		rpcPort = cluster.Spec.Network.RPCBindPort
 	}
-	config.WriteString(fmt.Sprintf("rpc_bind_addr = \"[::]:%d\"\n", rpcPort))
+	fmt.Fprintf(config, "rpc_bind_addr = \"[::]:%d\"\n", rpcPort)
 	config.WriteString("rpc_secret_file = \"/secrets/rpc/rpc-secret\"\n")
 
-	// Additional RPC options
 	if cluster.Spec.Network.RPCPublicAddr != "" {
-		config.WriteString(fmt.Sprintf("rpc_public_addr = \"%s\"\n", cluster.Spec.Network.RPCPublicAddr))
+		fmt.Fprintf(config, "rpc_public_addr = \"%s\"\n", cluster.Spec.Network.RPCPublicAddr)
 	}
 	if cluster.Spec.Network.RPCPublicAddrSubnet != "" {
-		config.WriteString(fmt.Sprintf("rpc_public_addr_subnet = \"%s\"\n", cluster.Spec.Network.RPCPublicAddrSubnet))
+		fmt.Fprintf(config, "rpc_public_addr_subnet = \"%s\"\n", cluster.Spec.Network.RPCPublicAddrSubnet)
 	}
 	if cluster.Spec.Network.RPCBindOutgoing {
 		config.WriteString("rpc_bind_outgoing = true\n")
 	}
 	if cluster.Spec.Network.RPCPingTimeoutMs != nil {
-		config.WriteString(fmt.Sprintf("rpc_ping_timeout_msec = %d\n", *cluster.Spec.Network.RPCPingTimeoutMs))
+		fmt.Fprintf(config, "rpc_ping_timeout_msec = %d\n", *cluster.Spec.Network.RPCPingTimeoutMs)
 	}
 	if cluster.Spec.Network.RPCTimeoutMs != nil {
-		config.WriteString(fmt.Sprintf("rpc_timeout_msec = %d\n", *cluster.Spec.Network.RPCTimeoutMs))
+		fmt.Fprintf(config, "rpc_timeout_msec = %d\n", *cluster.Spec.Network.RPCTimeoutMs)
 	}
 
-	// Bootstrap peers: combine headless service with any user-provided peers for multi-cluster
+	// Bootstrap peers
 	headlessService := cluster.Name + "-headless"
 	headlessPeer := fmt.Sprintf("%s.%s.svc.cluster.local:%d", headlessService, cluster.Namespace, rpcPort)
 
-	var allPeers []string
-	allPeers = append(allPeers, headlessPeer)
+	allPeers := []string{headlessPeer}
+	allPeers = append(allPeers, cluster.Spec.Network.BootstrapPeers...)
 
-	// Add user-provided bootstrap peers (required for multi-cluster federation)
-	if len(cluster.Spec.Network.BootstrapPeers) > 0 {
-		allPeers = append(allPeers, cluster.Spec.Network.BootstrapPeers...)
-	}
-
-	// Format as TOML array
-	var quotedPeers []string
+	quotedPeers := make([]string, 0, len(allPeers))
 	for _, peer := range allPeers {
 		quotedPeers = append(quotedPeers, fmt.Sprintf("\"%s\"", peer))
 	}
-	config.WriteString(fmt.Sprintf("bootstrap_peers = [%s]\n", strings.Join(quotedPeers, ", ")))
+	fmt.Fprintf(config, "bootstrap_peers = [%s]\n", strings.Join(quotedPeers, ", "))
+}
 
-	// S3 API
-	if cluster.Spec.S3API == nil || cluster.Spec.S3API.Enabled {
-		config.WriteString("\n[s3_api]\n")
-		s3Port := int32(3900)
-		if cluster.Spec.S3API != nil && cluster.Spec.S3API.BindPort != 0 {
-			s3Port = cluster.Spec.S3API.BindPort
+func writeS3APIConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.S3API != nil && !cluster.Spec.S3API.Enabled {
+		return
+	}
+	config.WriteString("\n[s3_api]\n")
+	s3Port := int32(3900)
+	if cluster.Spec.S3API != nil && cluster.Spec.S3API.BindPort != 0 {
+		s3Port = cluster.Spec.S3API.BindPort
+	}
+	if cluster.Spec.S3API != nil && cluster.Spec.S3API.BindAddress != "" {
+		fmt.Fprintf(config, "api_bind_addr = \"%s\"\n", cluster.Spec.S3API.BindAddress)
+	} else {
+		fmt.Fprintf(config, "api_bind_addr = \"[::]:%d\"\n", s3Port)
+	}
+	region := "garage"
+	if cluster.Spec.S3API != nil && cluster.Spec.S3API.Region != "" {
+		region = cluster.Spec.S3API.Region
+	}
+	fmt.Fprintf(config, "s3_region = \"%s\"\n", region)
+	if cluster.Spec.S3API != nil && cluster.Spec.S3API.RootDomain != "" {
+		fmt.Fprintf(config, "root_domain = \"%s\"\n", cluster.Spec.S3API.RootDomain)
+	}
+}
+
+func writeK2VAPIConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.K2VAPI == nil || !cluster.Spec.K2VAPI.Enabled {
+		return
+	}
+	config.WriteString("\n[k2v_api]\n")
+	if cluster.Spec.K2VAPI.BindAddress != "" {
+		fmt.Fprintf(config, "api_bind_addr = \"%s\"\n", cluster.Spec.K2VAPI.BindAddress)
+	} else {
+		k2vPort := int32(3904)
+		if cluster.Spec.K2VAPI.BindPort != 0 {
+			k2vPort = cluster.Spec.K2VAPI.BindPort
 		}
-		if cluster.Spec.S3API != nil && cluster.Spec.S3API.BindAddress != "" {
-			config.WriteString(fmt.Sprintf("api_bind_addr = \"%s\"\n", cluster.Spec.S3API.BindAddress))
-		} else {
-			config.WriteString(fmt.Sprintf("api_bind_addr = \"[::]:%d\"\n", s3Port))
+		fmt.Fprintf(config, "api_bind_addr = \"[::]:%d\"\n", k2vPort)
+	}
+}
+
+func writeWebAPIConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.WebAPI == nil || !cluster.Spec.WebAPI.Enabled || cluster.Spec.WebAPI.RootDomain == "" {
+		return
+	}
+	config.WriteString("\n[s3_web]\n")
+	if cluster.Spec.WebAPI.BindAddress != "" {
+		fmt.Fprintf(config, "bind_addr = \"%s\"\n", cluster.Spec.WebAPI.BindAddress)
+	} else {
+		webPort := int32(3902)
+		if cluster.Spec.WebAPI.BindPort != 0 {
+			webPort = cluster.Spec.WebAPI.BindPort
 		}
-		region := "garage"
-		if cluster.Spec.S3API != nil && cluster.Spec.S3API.Region != "" {
-			region = cluster.Spec.S3API.Region
+		fmt.Fprintf(config, "bind_addr = \"[::]:%d\"\n", webPort)
+	}
+	fmt.Fprintf(config, "root_domain = \"%s\"\n", cluster.Spec.WebAPI.RootDomain)
+	if cluster.Spec.WebAPI.AddHostToMetrics {
+		config.WriteString("add_host_to_metrics = true\n")
+	}
+}
+
+func writeAdminConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.Admin != nil && !cluster.Spec.Admin.Enabled {
+		return
+	}
+	config.WriteString("\n[admin]\n")
+	if cluster.Spec.Admin != nil && cluster.Spec.Admin.BindAddress != "" {
+		fmt.Fprintf(config, "api_bind_addr = \"%s\"\n", cluster.Spec.Admin.BindAddress)
+	} else {
+		adminPort := int32(3903)
+		if cluster.Spec.Admin != nil && cluster.Spec.Admin.BindPort != 0 {
+			adminPort = cluster.Spec.Admin.BindPort
 		}
-		config.WriteString(fmt.Sprintf("s3_region = \"%s\"\n", region))
-		if cluster.Spec.S3API != nil && cluster.Spec.S3API.RootDomain != "" {
-			config.WriteString(fmt.Sprintf("root_domain = \"%s\"\n", cluster.Spec.S3API.RootDomain))
+		fmt.Fprintf(config, "api_bind_addr = \"[::]:%d\"\n", adminPort)
+	}
+	if cluster.Spec.Admin != nil && cluster.Spec.Admin.AdminTokenSecretRef != nil {
+		config.WriteString("admin_token_file = \"/secrets/admin/admin-token\"\n")
+	}
+	if cluster.Spec.Admin != nil && cluster.Spec.Admin.MetricsTokenSecretRef != nil {
+		config.WriteString("metrics_token_file = \"/secrets/metrics/metrics-token\"\n")
+	}
+	if cluster.Spec.Admin != nil && cluster.Spec.Admin.MetricsRequireToken {
+		config.WriteString("metrics_require_token = true\n")
+	}
+	if cluster.Spec.Admin != nil && cluster.Spec.Admin.TraceSink != "" {
+		fmt.Fprintf(config, "trace_sink = \"%s\"\n", cluster.Spec.Admin.TraceSink)
+	}
+}
+
+func writeKubernetesDiscoveryConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.Discovery == nil || cluster.Spec.Discovery.Kubernetes == nil || !cluster.Spec.Discovery.Kubernetes.Enabled {
+		return
+	}
+	k8s := cluster.Spec.Discovery.Kubernetes
+	config.WriteString("\n[kubernetes_discovery]\n")
+	if k8s.Namespace != "" {
+		fmt.Fprintf(config, "namespace = \"%s\"\n", k8s.Namespace)
+	} else {
+		fmt.Fprintf(config, "namespace = \"%s\"\n", cluster.Namespace)
+	}
+	if k8s.ServiceName != "" {
+		fmt.Fprintf(config, "service_name = \"%s\"\n", k8s.ServiceName)
+	} else {
+		fmt.Fprintf(config, "service_name = \"%s\"\n", cluster.Name)
+	}
+	if k8s.SkipCRD {
+		config.WriteString("skip_crd = true\n")
+	}
+}
+
+func writeConsulDiscoveryConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.Discovery == nil || cluster.Spec.Discovery.Consul == nil || !cluster.Spec.Discovery.Consul.Enabled {
+		return
+	}
+	consul := cluster.Spec.Discovery.Consul
+	config.WriteString("\n[consul_discovery]\n")
+	if consul.API != "" {
+		fmt.Fprintf(config, "api = \"%s\"\n", consul.API)
+	}
+	if consul.HTTPAddr != "" {
+		fmt.Fprintf(config, "consul_http_addr = \"%s\"\n", consul.HTTPAddr)
+	}
+	if consul.ServiceName != "" {
+		fmt.Fprintf(config, "service_name = \"%s\"\n", consul.ServiceName)
+	}
+	if consul.CACert != "" {
+		fmt.Fprintf(config, "ca_cert = \"%s\"\n", consul.CACert)
+	}
+	if consul.TLSSkipVerify {
+		config.WriteString("tls_skip_verify = true\n")
+	}
+	if len(consul.Tags) > 0 {
+		config.WriteString("tags = [")
+		for i, tag := range consul.Tags {
+			if i > 0 {
+				config.WriteString(", ")
+			}
+			fmt.Fprintf(config, "\"%s\"", tag)
+		}
+		config.WriteString("]\n")
+	}
+	if len(consul.Meta) > 0 {
+		config.WriteString("[consul_discovery.meta]\n")
+		for k, v := range consul.Meta {
+			fmt.Fprintf(config, "%s = \"%s\"\n", k, v)
 		}
 	}
-
-	// K2V API
-	if cluster.Spec.K2VAPI != nil && cluster.Spec.K2VAPI.Enabled {
-		config.WriteString("\n[k2v_api]\n")
-		if cluster.Spec.K2VAPI.BindAddress != "" {
-			config.WriteString(fmt.Sprintf("api_bind_addr = \"%s\"\n", cluster.Spec.K2VAPI.BindAddress))
-		} else {
-			k2vPort := int32(3904)
-			if cluster.Spec.K2VAPI.BindPort != 0 {
-				k2vPort = cluster.Spec.K2VAPI.BindPort
+	if len(consul.Datacenters) > 0 {
+		config.WriteString("datacenters = [")
+		for i, dc := range consul.Datacenters {
+			if i > 0 {
+				config.WriteString(", ")
 			}
-			config.WriteString(fmt.Sprintf("api_bind_addr = \"[::]:%d\"\n", k2vPort))
+			fmt.Fprintf(config, "\"%s\"", dc)
 		}
+		config.WriteString("]\n")
 	}
-
-	// Web API (only enabled if RootDomain is set, as it's required by Garage)
-	if cluster.Spec.WebAPI != nil && cluster.Spec.WebAPI.Enabled && cluster.Spec.WebAPI.RootDomain != "" {
-		config.WriteString("\n[s3_web]\n")
-		if cluster.Spec.WebAPI.BindAddress != "" {
-			config.WriteString(fmt.Sprintf("bind_addr = \"%s\"\n", cluster.Spec.WebAPI.BindAddress))
-		} else {
-			webPort := int32(3902)
-			if cluster.Spec.WebAPI.BindPort != 0 {
-				webPort = cluster.Spec.WebAPI.BindPort
-			}
-			config.WriteString(fmt.Sprintf("bind_addr = \"[::]:%d\"\n", webPort))
-		}
-		config.WriteString(fmt.Sprintf("root_domain = \"%s\"\n", cluster.Spec.WebAPI.RootDomain))
-		if cluster.Spec.WebAPI.AddHostToMetrics {
-			config.WriteString("add_host_to_metrics = true\n")
-		}
-	}
-
-	// Admin API
-	if cluster.Spec.Admin == nil || cluster.Spec.Admin.Enabled {
-		config.WriteString("\n[admin]\n")
-		if cluster.Spec.Admin != nil && cluster.Spec.Admin.BindAddress != "" {
-			config.WriteString(fmt.Sprintf("api_bind_addr = \"%s\"\n", cluster.Spec.Admin.BindAddress))
-		} else {
-			adminPort := int32(3903)
-			if cluster.Spec.Admin != nil && cluster.Spec.Admin.BindPort != 0 {
-				adminPort = cluster.Spec.Admin.BindPort
-			}
-			config.WriteString(fmt.Sprintf("api_bind_addr = \"[::]:%d\"\n", adminPort))
-		}
-		// Only set admin_token_file if a secret is actually configured
-		// Otherwise Garage will fail to start because the file doesn't exist
-		if cluster.Spec.Admin != nil && cluster.Spec.Admin.AdminTokenSecretRef != nil {
-			config.WriteString("admin_token_file = \"/secrets/admin/admin-token\"\n")
-		}
-		// Metrics token
-		if cluster.Spec.Admin != nil && cluster.Spec.Admin.MetricsTokenSecretRef != nil {
-			config.WriteString("metrics_token_file = \"/secrets/metrics/metrics-token\"\n")
-		}
-		if cluster.Spec.Admin != nil && cluster.Spec.Admin.MetricsRequireToken {
-			config.WriteString("metrics_require_token = true\n")
-		}
-		// Trace sink for OpenTelemetry
-		if cluster.Spec.Admin != nil && cluster.Spec.Admin.TraceSink != "" {
-			config.WriteString(fmt.Sprintf("trace_sink = \"%s\"\n", cluster.Spec.Admin.TraceSink))
-		}
-	}
-
-	// Kubernetes discovery (optional - operator already handles bootstrap via Admin API,
-	// but some users may want Garage's native discovery as well)
-	if cluster.Spec.Discovery != nil && cluster.Spec.Discovery.Kubernetes != nil && cluster.Spec.Discovery.Kubernetes.Enabled {
-		k8s := cluster.Spec.Discovery.Kubernetes
-		config.WriteString("\n[kubernetes_discovery]\n")
-		if k8s.Namespace != "" {
-			config.WriteString(fmt.Sprintf("namespace = \"%s\"\n", k8s.Namespace))
-		} else {
-			// Default to cluster's namespace
-			config.WriteString(fmt.Sprintf("namespace = \"%s\"\n", cluster.Namespace))
-		}
-		if k8s.ServiceName != "" {
-			config.WriteString(fmt.Sprintf("service_name = \"%s\"\n", k8s.ServiceName))
-		} else {
-			// Default to cluster name
-			config.WriteString(fmt.Sprintf("service_name = \"%s\"\n", cluster.Name))
-		}
-		if k8s.SkipCRD {
-			config.WriteString("skip_crd = true\n")
-		}
-	}
-
-	// Consul discovery (optional - for multi-cluster setups using Consul)
-	if cluster.Spec.Discovery != nil && cluster.Spec.Discovery.Consul != nil && cluster.Spec.Discovery.Consul.Enabled {
-		consul := cluster.Spec.Discovery.Consul
-		config.WriteString("\n[consul_discovery]\n")
-		if consul.API != "" {
-			config.WriteString(fmt.Sprintf("api = \"%s\"\n", consul.API))
-		}
-		if consul.HTTPAddr != "" {
-			config.WriteString(fmt.Sprintf("consul_http_addr = \"%s\"\n", consul.HTTPAddr))
-		}
-		if consul.ServiceName != "" {
-			config.WriteString(fmt.Sprintf("service_name = \"%s\"\n", consul.ServiceName))
-		}
-		if consul.CACert != "" {
-			config.WriteString(fmt.Sprintf("ca_cert = \"%s\"\n", consul.CACert))
-		}
-		// Note: client_cert, client_key, and token would need secret mounting to work properly
-		// For now we just generate the config if inline values are provided
-		if consul.TLSSkipVerify {
-			config.WriteString("tls_skip_verify = true\n")
-		}
-		if len(consul.Tags) > 0 {
-			config.WriteString("tags = [")
-			for i, tag := range consul.Tags {
-				if i > 0 {
-					config.WriteString(", ")
-				}
-				config.WriteString(fmt.Sprintf("\"%s\"", tag))
-			}
-			config.WriteString("]\n")
-		}
-		if len(consul.Meta) > 0 {
-			config.WriteString("[consul_discovery.meta]\n")
-			for k, v := range consul.Meta {
-				config.WriteString(fmt.Sprintf("%s = \"%s\"\n", k, v))
-			}
-		}
-		if len(consul.Datacenters) > 0 {
-			config.WriteString("datacenters = [")
-			for i, dc := range consul.Datacenters {
-				if i > 0 {
-					config.WriteString(", ")
-				}
-				config.WriteString(fmt.Sprintf("\"%s\"", dc))
-			}
-			config.WriteString("]\n")
-		}
-	}
-
-	return config.String()
 }
 
 func (r *GarageClusterReconciler) reconcileHeadlessService(ctx context.Context, cluster *garagev1alpha1.GarageCluster) error {

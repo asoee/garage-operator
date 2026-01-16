@@ -157,175 +157,154 @@ func (r *GarageKeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 func (r *GarageKeyReconciler) reconcileKey(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client) (string, error) {
-	log := logf.FromContext(ctx)
-
-	// Determine key name
 	keyName := key.Name
 	if key.Spec.Name != "" {
 		keyName = key.Spec.Name
 	}
 
-	var garageKey *garage.Key
-	var secretAccessKey string
-
-	// Check if we have an existing key
-	if key.Status.AccessKeyID != "" {
-		existing, err := garageClient.GetKey(ctx, garage.GetKeyRequest{ID: key.Status.AccessKeyID})
-		if err == nil {
-			garageKey = existing
-		}
-	}
-
-	// Handle import
-	if key.Spec.ImportKey != nil && garageKey == nil {
-		log.Info("Importing existing key", "name", keyName)
-
-		accessKeyID := key.Spec.ImportKey.AccessKeyID
-		secretKey := key.Spec.ImportKey.SecretAccessKey
-
-		// If secretRef is provided, get credentials from secret
-		if key.Spec.ImportKey.SecretRef != nil {
-			importSecret := &corev1.Secret{}
-			if err := r.Get(ctx, types.NamespacedName{
-				Name:      key.Spec.ImportKey.SecretRef.Name,
-				Namespace: key.Spec.ImportKey.SecretRef.Namespace,
-			}, importSecret); err != nil {
-				return "", fmt.Errorf("failed to get import secret: %w", err)
-			}
-			if importSecret.Data == nil {
-				return "", fmt.Errorf("import secret %s has no data", key.Spec.ImportKey.SecretRef.Name)
-			}
-			accessKeyIDData, ok := importSecret.Data["access-key-id"]
-			if !ok {
-				return "", fmt.Errorf("import secret %s missing access-key-id", key.Spec.ImportKey.SecretRef.Name)
-			}
-			secretKeyData, ok := importSecret.Data["secret-access-key"]
-			if !ok {
-				return "", fmt.Errorf("import secret %s missing secret-access-key", key.Spec.ImportKey.SecretRef.Name)
-			}
-			accessKeyID = string(accessKeyIDData)
-			secretKey = string(secretKeyData)
-		}
-
-		imported, err := garageClient.ImportKey(ctx, garage.ImportKeyRequest{
-			AccessKeyID:     accessKeyID,
-			SecretAccessKey: secretKey,
-			Name:            keyName,
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to import key: %w", err)
-		}
-		garageKey = imported
-		secretAccessKey = secretKey
-	}
-
-	// Create new key if needed
-	if garageKey == nil {
-		log.Info("Creating new key", "name", keyName)
-
-		// Build creation request with all initial settings to avoid separate update call
-		createReq := garage.CreateKeyRequest{Name: keyName}
-		if key.Spec.NeverExpires {
-			createReq.NeverExpires = true
-		} else if key.Spec.Expiration != "" {
-			createReq.Expiration = &key.Spec.Expiration
-		}
-		if key.Spec.Permissions != nil && key.Spec.Permissions.CreateBucket {
-			createReq.Allow = &garage.KeyPermissions{CreateBucket: true}
-		}
-
-		created, err := garageClient.CreateKeyWithOptions(ctx, createReq)
-		if err != nil {
-			return "", fmt.Errorf("failed to create key: %w", err)
-		}
-		garageKey = created
-		secretAccessKey = created.SecretAccessKey
-	} else {
-		// Existing key - check if update is needed for expiration/permissions
-		needsUpdate := false
-		updateReq := garage.UpdateKeyRequest{
-			ID: garageKey.AccessKeyID,
-		}
-
-		// Handle expiration settings
-		if key.Spec.NeverExpires {
-			updateReq.Body.NeverExpires = true
-			needsUpdate = true
-		} else if key.Spec.Expiration != "" {
-			updateReq.Body.Expiration = &key.Spec.Expiration
-			needsUpdate = true
-		}
-
-		// Handle key permissions
-		if key.Spec.Permissions != nil && key.Spec.Permissions.CreateBucket {
-			updateReq.Body.Allow = &garage.KeyPermissions{CreateBucket: true}
-			needsUpdate = true
-		}
-
-		if needsUpdate {
-			if _, err := garageClient.UpdateKey(ctx, updateReq); err != nil {
-				return "", fmt.Errorf("failed to update key: %w", err)
-			}
-		}
+	garageKey, secretAccessKey, err := r.getOrCreateKey(ctx, key, garageClient, keyName)
+	if err != nil {
+		return "", err
 	}
 
 	key.Status.AccessKeyID = garageKey.AccessKeyID
 	key.Status.KeyID = garageKey.AccessKeyID
 
-	// Handle bucket permissions from the key spec
+	if err := r.reconcileBucketPermissions(ctx, key, garageClient, garageKey.AccessKeyID); err != nil {
+		return secretAccessKey, err
+	}
+
+	return secretAccessKey, nil
+}
+
+func (r *GarageKeyReconciler) getOrCreateKey(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, keyName string) (*garage.Key, string, error) {
+	if key.Status.AccessKeyID != "" {
+		existing, err := garageClient.GetKey(ctx, garage.GetKeyRequest{ID: key.Status.AccessKeyID})
+		if err == nil {
+			if err := r.updateKeyIfNeeded(ctx, key, garageClient, existing); err != nil {
+				return nil, "", err
+			}
+			return existing, "", nil
+		}
+	}
+
+	if key.Spec.ImportKey != nil {
+		return r.importKey(ctx, key, garageClient, keyName)
+	}
+
+	return r.createKey(ctx, key, garageClient, keyName)
+}
+
+func (r *GarageKeyReconciler) importKey(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, keyName string) (*garage.Key, string, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Importing existing key", "name", keyName)
+
+	accessKeyID := key.Spec.ImportKey.AccessKeyID
+	secretKey := key.Spec.ImportKey.SecretAccessKey
+
+	if key.Spec.ImportKey.SecretRef != nil {
+		importSecret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{
+			Name:      key.Spec.ImportKey.SecretRef.Name,
+			Namespace: key.Spec.ImportKey.SecretRef.Namespace,
+		}, importSecret); err != nil {
+			return nil, "", fmt.Errorf("failed to get import secret: %w", err)
+		}
+		if importSecret.Data == nil {
+			return nil, "", fmt.Errorf("import secret %s has no data", key.Spec.ImportKey.SecretRef.Name)
+		}
+		accessKeyIDData, ok := importSecret.Data["access-key-id"]
+		if !ok {
+			return nil, "", fmt.Errorf("import secret %s missing access-key-id", key.Spec.ImportKey.SecretRef.Name)
+		}
+		secretKeyData, ok := importSecret.Data["secret-access-key"]
+		if !ok {
+			return nil, "", fmt.Errorf("import secret %s missing secret-access-key", key.Spec.ImportKey.SecretRef.Name)
+		}
+		accessKeyID = string(accessKeyIDData)
+		secretKey = string(secretKeyData)
+	}
+
+	imported, err := garageClient.ImportKey(ctx, garage.ImportKeyRequest{
+		AccessKeyID:     accessKeyID,
+		SecretAccessKey: secretKey,
+		Name:            keyName,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to import key: %w", err)
+	}
+	return imported, secretKey, nil
+}
+
+func (r *GarageKeyReconciler) createKey(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, keyName string) (*garage.Key, string, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Creating new key", "name", keyName)
+
+	createReq := garage.CreateKeyRequest{Name: keyName}
+	if key.Spec.NeverExpires {
+		createReq.NeverExpires = true
+	} else if key.Spec.Expiration != "" {
+		createReq.Expiration = &key.Spec.Expiration
+	}
+	if key.Spec.Permissions != nil && key.Spec.Permissions.CreateBucket {
+		createReq.Allow = &garage.KeyPermissions{CreateBucket: true}
+	}
+
+	created, err := garageClient.CreateKeyWithOptions(ctx, createReq)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create key: %w", err)
+	}
+	return created, created.SecretAccessKey, nil
+}
+
+func (r *GarageKeyReconciler) updateKeyIfNeeded(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, garageKey *garage.Key) error {
+	needsUpdate := false
+	updateReq := garage.UpdateKeyRequest{ID: garageKey.AccessKeyID}
+
+	if key.Spec.NeverExpires {
+		updateReq.Body.NeverExpires = true
+		needsUpdate = true
+	} else if key.Spec.Expiration != "" {
+		updateReq.Body.Expiration = &key.Spec.Expiration
+		needsUpdate = true
+	}
+
+	if key.Spec.Permissions != nil && key.Spec.Permissions.CreateBucket {
+		updateReq.Body.Allow = &garage.KeyPermissions{CreateBucket: true}
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		if _, err := garageClient.UpdateKey(ctx, updateReq); err != nil {
+			return fmt.Errorf("failed to update key: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *GarageKeyReconciler) reconcileBucketPermissions(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, accessKeyID string) error {
+	log := logf.FromContext(ctx)
 	var permissionErrors []string
 	pendingBuckets := false
+
 	for _, bucketPerm := range key.Spec.BucketPermissions {
-		var bucketID string
-		var bucketRef string
-
-		// Resolve bucket reference
-		if bucketPerm.BucketRef != "" {
-			bucketRef = bucketPerm.BucketRef
-			bucket := &garagev1alpha1.GarageBucket{}
-			if err := r.Get(ctx, types.NamespacedName{
-				Name:      bucketPerm.BucketRef,
-				Namespace: key.Namespace,
-			}, bucket); err != nil {
-				if errors.IsNotFound(err) {
-					log.Info("Bucket not found, will retry", "bucketRef", bucketPerm.BucketRef)
-					pendingBuckets = true
-					continue
-				}
-				return "", fmt.Errorf("failed to get bucket %s: %w", bucketPerm.BucketRef, err)
-			}
-			if bucket.Status.BucketID == "" {
-				log.Info("Bucket not yet created in Garage, will retry", "bucketRef", bucketPerm.BucketRef)
-				pendingBuckets = true
-				continue
-			}
-			bucketID = bucket.Status.BucketID
-		} else if bucketPerm.BucketID != "" {
-			bucketID = bucketPerm.BucketID
-			bucketRef = bucketPerm.BucketID
-		} else if bucketPerm.GlobalAlias != "" {
-			bucketRef = bucketPerm.GlobalAlias
-			bucket, err := garageClient.GetBucket(ctx, garage.GetBucketRequest{GlobalAlias: bucketPerm.GlobalAlias})
-			if err != nil {
-				log.Error(err, "Failed to get bucket by alias", "alias", bucketPerm.GlobalAlias)
-				permissionErrors = append(permissionErrors, fmt.Sprintf("%s: %v", bucketPerm.GlobalAlias, err))
-				continue
-			}
-			bucketID = bucket.ID
+		bucketID, bucketRef, pending, err := r.resolveBucketID(ctx, key.Namespace, bucketPerm, garageClient)
+		if err != nil {
+			permissionErrors = append(permissionErrors, fmt.Sprintf("%s: %v", bucketRef, err))
+			continue
 		}
-
+		if pending {
+			pendingBuckets = true
+			continue
+		}
 		if bucketID == "" {
 			continue
 		}
 
-		_, err := garageClient.AllowBucketKey(ctx, garage.AllowBucketKeyRequest{
+		_, err = garageClient.AllowBucketKey(ctx, garage.AllowBucketKeyRequest{
 			BucketID:    bucketID,
-			AccessKeyID: garageKey.AccessKeyID,
-			Permissions: garage.BucketKeyPerms{
-				Read:  bucketPerm.Read,
-				Write: bucketPerm.Write,
-				Owner: bucketPerm.Owner,
-			},
+			AccessKeyID: accessKeyID,
+			Permissions: garage.BucketKeyPerms{Read: bucketPerm.Read, Write: bucketPerm.Write, Owner: bucketPerm.Owner},
 		})
 		if err != nil {
 			log.Error(err, "Failed to set bucket permission", "bucket", bucketRef)
@@ -333,18 +312,50 @@ func (r *GarageKeyReconciler) reconcileKey(ctx context.Context, key *garagev1alp
 		}
 	}
 
-	// If there are pending buckets, return an error to requeue and retry
 	if pendingBuckets {
-		log.Info("Some buckets not ready, will retry permission grants")
-		return secretAccessKey, fmt.Errorf("waiting for buckets to be ready before granting permissions")
+		return fmt.Errorf("waiting for buckets to be ready before granting permissions")
 	}
-
-	// If there were permission errors, return them so status reflects the issue
 	if len(permissionErrors) > 0 {
-		return secretAccessKey, fmt.Errorf("failed to set permissions for buckets: %v", permissionErrors)
+		return fmt.Errorf("failed to set permissions for buckets: %v", permissionErrors)
+	}
+	return nil
+}
+
+func (r *GarageKeyReconciler) resolveBucketID(ctx context.Context, namespace string, bucketPerm garagev1alpha1.BucketPermission, garageClient *garage.Client) (bucketID, bucketRef string, pending bool, err error) {
+	log := logf.FromContext(ctx)
+
+	if bucketPerm.BucketRef != "" {
+		bucketRef = bucketPerm.BucketRef
+		bucket := &garagev1alpha1.GarageBucket{}
+		if err := r.Get(ctx, types.NamespacedName{Name: bucketPerm.BucketRef, Namespace: namespace}, bucket); err != nil {
+			if errors.IsNotFound(err) {
+				log.Info("Bucket not found, will retry", "bucketRef", bucketPerm.BucketRef)
+				return "", bucketRef, true, nil
+			}
+			return "", bucketRef, false, fmt.Errorf("failed to get bucket %s: %w", bucketPerm.BucketRef, err)
+		}
+		if bucket.Status.BucketID == "" {
+			log.Info("Bucket not yet created in Garage, will retry", "bucketRef", bucketPerm.BucketRef)
+			return "", bucketRef, true, nil
+		}
+		return bucket.Status.BucketID, bucketRef, false, nil
 	}
 
-	return secretAccessKey, nil
+	if bucketPerm.BucketID != "" {
+		return bucketPerm.BucketID, bucketPerm.BucketID, false, nil
+	}
+
+	if bucketPerm.GlobalAlias != "" {
+		bucketRef = bucketPerm.GlobalAlias
+		bucket, err := garageClient.GetBucket(ctx, garage.GetBucketRequest{GlobalAlias: bucketPerm.GlobalAlias})
+		if err != nil {
+			log.Error(err, "Failed to get bucket by alias", "alias", bucketPerm.GlobalAlias)
+			return "", bucketRef, false, err
+		}
+		return bucket.ID, bucketRef, false, nil
+	}
+
+	return "", "", false, nil
 }
 
 // secretConfig holds resolved secret configuration from SecretTemplate
