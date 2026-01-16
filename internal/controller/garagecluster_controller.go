@@ -1767,12 +1767,11 @@ func (r *GarageClusterReconciler) connectToRemoteCluster(
 	}
 
 	// Connect to each node in the remote cluster
+	// Note: We connect to ALL nodes, including those without a role.
+	// During bootstrap, nodes may not be in the layout yet but we still
+	// need to establish connections so they can be discovered and added.
 	connectedCount := 0
 	for _, node := range remoteStatus.Nodes {
-		if node.Role == nil {
-			continue // Skip nodes not in layout
-		}
-
 		// Determine the address to use for connection
 		var addr string
 		if node.Address != nil && *node.Address != "" {
