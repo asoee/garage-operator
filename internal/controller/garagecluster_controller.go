@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -1044,15 +1045,23 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 		podLabels[k] = v
 	}
 
-	// Build pod annotations with config checksum to trigger rolling restart on config changes.
+	// Compute pod-spec-hash from the PodSpec to detect changes to probes, image, resources, etc.
+	// This is separate from config-hash (which only covers the ConfigMap content).
+	// When either hash changes, the StatefulSet will be updated and pods will restart.
+	podSpecBytes, _ := json.Marshal(podSpec)
+	podSpecHash := sha256.Sum256(podSpecBytes)
+	podSpecHashStr := hex.EncodeToString(podSpecHash[:8]) // First 8 bytes = 16 hex chars
+
+	// Build pod annotations with checksums to trigger rolling restart on changes.
 	// This is required because Garage does NOT support hot-reload - SIGHUP is explicitly
-	// ignored and config is only read at startup. When configHash changes, Kubernetes
+	// ignored and config is only read at startup. When hashes change, Kubernetes
 	// detects the annotation change and triggers a rolling update of the StatefulSet.
 	podAnnotations := make(map[string]string)
 	for k, v := range cluster.Spec.PodAnnotations {
 		podAnnotations[k] = v
 	}
 	podAnnotations["garage.rajsingh.info/config-hash"] = configHash
+	podAnnotations["garage.rajsingh.info/pod-spec-hash"] = podSpecHashStr
 
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1091,7 +1100,7 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 	// Check if update is needed by comparing key fields
 	needsUpdate := existing.Spec.Replicas == nil || *existing.Spec.Replicas != *sts.Spec.Replicas
 
-	// Check config hash annotation (indicates config/volume changes)
+	// Check config hash annotation (indicates ConfigMap/TOML changes)
 	existingConfigHash := existing.Spec.Template.Annotations["garage.rajsingh.info/config-hash"]
 	newConfigHash := sts.Spec.Template.Annotations["garage.rajsingh.info/config-hash"]
 	if existingConfigHash != newConfigHash {
@@ -1099,11 +1108,11 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 		needsUpdate = true
 	}
 
-	// Check volume count (detects secret volume additions/removals)
-	if len(existing.Spec.Template.Spec.Volumes) != len(sts.Spec.Template.Spec.Volumes) {
-		log.Info("Volume count changed, updating StatefulSet",
-			"old", len(existing.Spec.Template.Spec.Volumes),
-			"new", len(sts.Spec.Template.Spec.Volumes))
+	// Check pod-spec-hash annotation (detects changes to probes, image, resources, etc.)
+	existingPodSpecHash := existing.Spec.Template.Annotations["garage.rajsingh.info/pod-spec-hash"]
+	newPodSpecHash := sts.Spec.Template.Annotations["garage.rajsingh.info/pod-spec-hash"]
+	if existingPodSpecHash != newPodSpecHash {
+		log.Info("Pod spec hash changed, updating StatefulSet", "old", existingPodSpecHash, "new", newPodSpecHash)
 		needsUpdate = true
 	}
 
