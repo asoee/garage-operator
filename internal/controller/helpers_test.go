@@ -339,24 +339,25 @@ func TestBuildVolumeClaimTemplates(t *testing.T) {
 	storageClass := "fast-ssd"
 
 	tests := []struct {
-		name             string
-		cluster          *garagev1alpha1.GarageCluster
-		wantCount        int
-		wantDataPVCName  string
-		wantStorageClass *string
+		name                     string
+		cluster                  *garagev1alpha1.GarageCluster
+		wantMetadataSize         string
+		wantDataSize             string
+		wantDataStorageClass     *string
+		wantMetadataStorageClass *string
 	}{
 		{
 			name: "default storage sizes used when metadata/data storage not fully specified",
 			cluster: &garagev1alpha1.GarageCluster{
 				Spec: garagev1alpha1.GarageClusterSpec{
 					Storage: garagev1alpha1.StorageConfig{
-						MetadataStorage: &garagev1alpha1.VolumeConfig{}, // Required
+						MetadataStorage: &garagev1alpha1.VolumeConfig{},
 						DataStorage:     &garagev1alpha1.DataStorageConfig{},
 					},
 				},
 			},
-			wantCount:       1, // Only returns 1 PVC named "data"
-			wantDataPVCName: "data",
+			wantMetadataSize: "10Gi",
+			wantDataSize:     "100Gi",
 		},
 		{
 			name: "PVC config with volume config",
@@ -375,30 +376,59 @@ func TestBuildVolumeClaimTemplates(t *testing.T) {
 					},
 				},
 			},
-			wantCount:        1,
-			wantDataPVCName:  "data",
-			wantStorageClass: &storageClass,
+			wantMetadataSize:     "1Gi",
+			wantDataSize:         "10Gi",
+			wantDataStorageClass: &storageClass,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pvcs := buildVolumeClaimTemplates(tt.cluster)
-			if len(pvcs) != tt.wantCount {
-				t.Errorf("got %d PVCs, want %d", len(pvcs), tt.wantCount)
+			if len(pvcs) != 2 {
+				t.Errorf("got %d PVCs, want 2", len(pvcs))
 			}
 
-			if len(pvcs) > 0 && pvcs[0].Name != tt.wantDataPVCName {
-				t.Errorf("PVC name = %q, want %q", pvcs[0].Name, tt.wantDataPVCName)
+			if len(pvcs) < 2 {
+				return
 			}
 
-			if tt.wantStorageClass != nil && len(pvcs) > 0 {
-				if pvcs[0].Spec.StorageClassName == nil || *pvcs[0].Spec.StorageClassName != *tt.wantStorageClass {
+			// First PVC should be metadata
+			if pvcs[0].Name != "metadata" {
+				t.Errorf("PVC[0] name = %q, want %q", pvcs[0].Name, "metadata")
+			}
+			gotMetadataSize := pvcs[0].Spec.Resources.Requests[corev1.ResourceStorage]
+			if gotMetadataSize.String() != tt.wantMetadataSize {
+				t.Errorf("Metadata size = %q, want %q", gotMetadataSize.String(), tt.wantMetadataSize)
+			}
+
+			// Second PVC should be data
+			if pvcs[1].Name != "data" {
+				t.Errorf("PVC[1] name = %q, want %q", pvcs[1].Name, "data")
+			}
+			gotDataSize := pvcs[1].Spec.Resources.Requests[corev1.ResourceStorage]
+			if gotDataSize.String() != tt.wantDataSize {
+				t.Errorf("Data size = %q, want %q", gotDataSize.String(), tt.wantDataSize)
+			}
+
+			// Check storage classes
+			if tt.wantMetadataStorageClass != nil {
+				if pvcs[0].Spec.StorageClassName == nil || *pvcs[0].Spec.StorageClassName != *tt.wantMetadataStorageClass {
 					got := "<nil>"
 					if pvcs[0].Spec.StorageClassName != nil {
 						got = *pvcs[0].Spec.StorageClassName
 					}
-					t.Errorf("StorageClassName = %q, want %q", got, *tt.wantStorageClass)
+					t.Errorf("Metadata StorageClassName = %q, want %q", got, *tt.wantMetadataStorageClass)
+				}
+			}
+
+			if tt.wantDataStorageClass != nil {
+				if pvcs[1].Spec.StorageClassName == nil || *pvcs[1].Spec.StorageClassName != *tt.wantDataStorageClass {
+					got := "<nil>"
+					if pvcs[1].Spec.StorageClassName != nil {
+						got = *pvcs[1].Spec.StorageClassName
+					}
+					t.Errorf("Data StorageClassName = %q, want %q", got, *tt.wantDataStorageClass)
 				}
 			}
 		})

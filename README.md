@@ -1,85 +1,26 @@
 # Garage Kubernetes Operator
 
-A Kubernetes operator for managing [Garage](https://garagehq.deuxfleurs.fr/) - a distributed S3-compatible object storage system designed for self-hosting.
+<p align="center">
+  <img src="logo.svg" alt="Garage Kubernetes Operator" width="128" height="128">
+</p>
 
-## Description
+<p align="center">
+  <strong>S3-Compatible Object Storage on Kubernetes</strong>
+</p>
 
-This operator automates the deployment and lifecycle management of Garage clusters on Kubernetes. It provides:
+A Kubernetes operator for [Garage](https://garagehq.deuxfleurs.fr/) - distributed, self-hosted object storage with multi-cluster federation.
 
-- **GarageCluster**: Deploy and manage Garage StatefulSets with all configuration options
-- **GarageBucket**: Create and manage S3 buckets with quotas and website hosting
-- **GarageKey**: Manage S3 access keys with fine-grained bucket permissions
-- **GarageNode**: Configure node layouts for capacity and zone assignments
-- **GarageAdminToken**: Manage admin API authentication tokens
-
-### Key Features
-
-- Full Garage configuration exposed via CRDs
-- Multi-cluster federation support for geo-distributed deployments
-- Automatic node layout management
-- Website hosting configuration
-- Webhook validation for configuration errors
-- Rich status reporting and observability
-
-## Getting Started
-
-### Local Development
+## Install
 
 ```bash
-# Set up kind cluster with CRDs and operator
-make dev-up
-
-# Apply test resources (GarageCluster, GarageBucket, GarageKey)
-make dev-test
-
-# View status of all garage resources
-make dev-status
-
-# Stream operator logs
-make dev-logs
-
-# Rebuild and reload operator after code changes
-make dev-load
-
-# Tear down the cluster
-make dev-down
+helm install garage-operator oci://ghcr.io/rajsinghtech/charts/garage-operator \
+  --namespace garage-operator-system \
+  --create-namespace
 ```
 
-### Deploy to Production Cluster
+## Quick Start
 
-**Build and push the operator image:**
-
-```bash
-make docker-build docker-push IMG=<registry>/garage-operator:tag
-```
-
-**Install CRDs:**
-
-```bash
-make install
-```
-
-**Deploy the operator:**
-
-```bash
-make deploy IMG=<registry>/garage-operator:tag
-```
-
-**Apply sample resources:**
-
-```bash
-kubectl apply -k config/samples/
-```
-
-### Uninstall
-
-```bash
-kubectl delete -k config/samples/
-make uninstall
-make undeploy
-```
-
-## Quick Start Example
+Create a 3-node Garage cluster:
 
 ```yaml
 apiVersion: garage.rajsingh.info/v1alpha1
@@ -93,9 +34,11 @@ spec:
     factor: 3
   storage:
     dataSize: 100Gi
-  network:
-    rpcBindPort: 3901
----
+```
+
+Create a bucket:
+
+```yaml
 apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageBucket
 metadata:
@@ -105,7 +48,11 @@ spec:
     name: garage
   quotas:
     maxSize: 10Gi
----
+```
+
+Create access credentials:
+
+```yaml
 apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageKey
 metadata:
@@ -119,43 +66,30 @@ spec:
       write: true
 ```
 
-## Multi-Cluster Federation
+Get S3 credentials:
 
-Garage supports geo-distributed deployments across multiple Kubernetes clusters. Key requirements:
+```bash
+kubectl get secret my-key -o jsonpath='{.data.access-key-id}' | base64 -d
+kubectl get secret my-key -o jsonpath='{.data.secret-access-key}' | base64 -d
+```
 
-- **Direct connectivity**: Each node must reach all other nodes on RPC port (3901)
-- **Shared RPC secret**: All nodes authenticate with the same 32-byte hex secret
-- **Zone labels**: Each cluster uses a unique zone for fault tolerance
+S3 endpoint: `http://garage.default.svc.cluster.local:3900`
 
-Example federation setup:
+## Documentation
 
-```yaml
-apiVersion: garage.rajsingh.info/v1alpha1
-kind: GarageCluster
-metadata:
-  name: garage
-spec:
-  replicas: 3
-  zone: us-east-1
-  replication:
-    factor: 3
-    zoneRedundancy: "AtLeast(2)"
-  publicEndpoint:
-    type: LoadBalancer
-    loadBalancer:
-      perNode: true
-  remoteClusters:
-    - name: garage-eu
-      zone: eu-west-1
-      autoDiscover: true
-      connection:
-        kubeConfigSecretRef:
-          name: eu-kubeconfig
-          key: config
+- [Helm Chart](charts/garage-operator/) - Installation and configuration
+- [Garage Docs](https://garagehq.deuxfleurs.fr/) - Garage project documentation
+
+## Development
+
+```bash
+make dev-up       # Start kind cluster with operator
+make dev-test     # Apply test resources
+make dev-status   # View cluster status
+make dev-logs     # Stream operator logs
+make dev-down     # Tear down
 ```
 
 ## License
 
-Copyright 2026 Raj Singh.
-
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+Apache 2.0

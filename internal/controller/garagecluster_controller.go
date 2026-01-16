@@ -1483,10 +1483,36 @@ func assignNewNodesToLayout(ctx context.Context, garageClient *garage.Client, no
 		})
 	}
 
-	// If we have new roles to add, stage them
-	if len(newRoles) > 0 {
-		log.Info("Adding nodes to cluster layout", "count", len(newRoles))
-		if err := garageClient.UpdateClusterLayout(ctx, newRoles); err != nil {
+	// Build set of running node IDs for stale detection
+	runningNodes := make(map[string]bool)
+	for _, node := range nodes {
+		runningNodes[node.id] = true
+	}
+
+	// Find stale nodes: nodes in layout with our zone that are no longer running
+	staleRoles := make([]garage.NodeRoleChange, 0)
+	for _, role := range layout.Roles {
+		if role.Zone == zone && !runningNodes[role.ID] {
+			log.Info("Found stale node in layout", "nodeId", role.ID, "zone", role.Zone)
+			staleRoles = append(staleRoles, garage.NodeRoleChange{
+				ID:     role.ID,
+				Remove: true,
+			})
+		}
+	}
+
+	// Combine new roles and stale removals
+	allChanges := append(newRoles, staleRoles...)
+
+	// If we have changes to stage, apply them
+	if len(allChanges) > 0 {
+		if len(newRoles) > 0 {
+			log.Info("Adding nodes to cluster layout", "count", len(newRoles))
+		}
+		if len(staleRoles) > 0 {
+			log.Info("Removing stale nodes from cluster layout", "count", len(staleRoles))
+		}
+		if err := garageClient.UpdateClusterLayout(ctx, allChanges); err != nil {
 			return fmt.Errorf("failed to update cluster layout: %w", err)
 		}
 		// Refresh layout after staging

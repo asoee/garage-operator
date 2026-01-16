@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   xmlns="http://www.w3.org/2000/svg"
+   width="250"
+   height="250"
+   viewBox="0 0 250 250"
+   version="1.1">
+  <defs>
+    <style>
+      .k8s-blue{fill:#326CE5;}
+      .garage-orange{fill:#FF9329;}
+      .garage-yellow{fill:#FFD952;}
+      .garage-cyan{fill:#49c8fa;}
+      .garage-dark{fill:#4e4e4e;}
+      .bg-white{fill:#ffffff;}
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="250" height="250" class="bg-white"/>
+
+  <!-- Kubernetes Hexagon Base Layer (subtle) -->
+  <path class="k8s-blue" d="M 125 25 L 220 77.5 L 220 172.5 L 125 225 L 30 172.5 L 30 77.5 Z" opacity="0.15"/>
+
+  <!-- Garage Building - Layered roofs inspired by original -->
+  <g transform="translate(125, 125)">
+
+    <!-- Back roof layer (yellow) -->
+    <path class="garage-yellow"
+          d="M -45 -50
+             L -50 -47 L -50 -15 L -43 -15 L -43 -47 Z"/>
+    <path class="garage-yellow"
+          d="M 45 -50
+             L 50 -47 L 50 -15 L 43 -15 L 43 -47 Z"/>
+    <path class="garage-yellow"
+          d="M -50 -47
+             L 0 -70
+             L 50 -47
+             L 50 -42
+             L 0 -65
+             L -50 -42 Z"/>
+
+    <!-- Middle roof layer (orange) -->
+    <path class="garage-orange"
+          d="M -40 -38
+             L 0 -58
+             L 40 -38
+             L 40 -33
+             L 0 -53
+             L -40 -33 Z"/>
+
+    <!-- Front wall sections -->
+    <path class="garage-dark"
+          d="M -40 -33 L -40 5 L -30 5 L -30 -33 Z"/>
+    <path class="garage-dark"
+          d="M 40 -33 L 40 5 L 30 5 L 30 -33 Z"/>
+
+    <!-- Main garage door opening -->
+    <rect class="garage-dark"
+          x="-30" y="-33" width="60" height="38" rx="2"/>
+
+    <!-- Garage door panels (orange with yellow stripe - retro style) -->
+    <rect class="garage-orange"
+          x="-27" y="-30" width="54" height="32"/>
+
+    <!-- Horizontal yellow stripe across door -->
+    <rect class="garage-yellow"
+          x="-27" y="-16" width="54" height="6"/>
+
+    <!-- Door panel lines for detail -->
+    <line x1="-27" y1="-25" x2="27" y2="-25" stroke="#4e4e4e" stroke-width="1" opacity="0.3"/>
+    <line x1="-27" y1="-7" x2="27" y2="-7" stroke="#4e4e4e" stroke-width="1" opacity="0.3"/>
+
+    <!-- Central circular element (inspired by Garage logo wheel) -->
+    <circle class="garage-cyan" cx="0" cy="-8" r="12" opacity="0.9"/>
+    <circle class="garage-dark" cx="0" cy="-8" r="8"/>
+    <circle class="garage-cyan" cx="0" cy="-8" r="4"/>
+
+    <!-- Kubernetes hexagon integrated into wheel -->
+    <path class="k8s-blue"
+          d="M 0 -11
+             L 2.6 -9.5
+             L 2.6 -6.5
+             L 0 -5
+             L -2.6 -6.5
+             L -2.6 -9.5 Z"
+          opacity="0.6"/>
+
+    <!-- Base platform -->
+    <path class="garage-dark"
+          d="M -50 5 L -50 10 L 50 10 L 50 5 Z"/>
+
+    <!-- Side accent panels -->
+    <rect class="garage-yellow" x="-50" y="-25" width="10" height="15" opacity="0.7"/>
+    <rect class="garage-yellow" x="40" y="-25" width="10" height="15" opacity="0.7"/>
+
+    <!-- Door handle -->
+    <circle class="garage-yellow" cx="18" cy="-8" r="2.5"/>
+    <circle class="garage-dark" cx="18" cy="-8" r="1.5"/>
+
+  </g>
+
+  <!-- Subtle K8s wheel pattern in background (removed badge, kept integration) -->
+  <g transform="translate(125, 125)" opacity="0.1">
+    <!-- Spokes radiating from center -->
+    <line x1="0" y1="-90" x2="0" y2="-75" stroke="#326CE5" stroke-width="3"/>
+    <line x1="63.6" y1="-63.6" x2="53" y2="-53" stroke="#326CE5" stroke-width="3"/>
+    <line x1="90" y1="0" x2="75" y2="0" stroke="#326CE5" stroke-width="3"/>
+    <line x1="63.6" y1="63.6" x2="53" y2="53" stroke="#326CE5" stroke-width="3"/>
+    <line x1="0" y1="90" x2="0" y2="75" stroke="#326CE5" stroke-width="3"/>
+    <line x1="-63.6" y1="63.6" x2="-53" y2="53" stroke="#326CE5" stroke-width="3"/>
+    <line x1="-90" y1="0" x2="-75" y2="0" stroke="#326CE5" stroke-width="3"/>
+    <line x1="-63.6" y1="-63.6" x2="-53" y2="-53" stroke="#326CE5" stroke-width="3"/>
+  </g>
+
+</svg>
