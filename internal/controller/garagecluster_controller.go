@@ -921,14 +921,19 @@ func buildVolumeClaimTemplates(cluster *garagev1alpha1.GarageCluster) []corev1.P
 	}
 
 	// Data PVC - larger, can use cheaper storage (HDD)
+	// Priority: data.volume.size > data.size > dataSize > default
 	dataStorageSize := resource.MustParse("100Gi")
 	if cluster.Spec.Storage.DataSize != nil && !cluster.Spec.Storage.DataSize.IsZero() {
 		dataStorageSize = *cluster.Spec.Storage.DataSize
 	}
-	if cluster.Spec.Storage.DataStorage != nil &&
-		cluster.Spec.Storage.DataStorage.Volume != nil &&
-		!cluster.Spec.Storage.DataStorage.Volume.Size.IsZero() {
-		dataStorageSize = cluster.Spec.Storage.DataStorage.Volume.Size
+	if cluster.Spec.Storage.DataStorage != nil {
+		if cluster.Spec.Storage.DataStorage.Size != nil && !cluster.Spec.Storage.DataStorage.Size.IsZero() {
+			dataStorageSize = *cluster.Spec.Storage.DataStorage.Size
+		}
+		if cluster.Spec.Storage.DataStorage.Volume != nil &&
+			!cluster.Spec.Storage.DataStorage.Volume.Size.IsZero() {
+			dataStorageSize = cluster.Spec.Storage.DataStorage.Volume.Size
+		}
 	}
 
 	dataPVC := corev1.PersistentVolumeClaim{
@@ -944,12 +949,18 @@ func buildVolumeClaimTemplates(cluster *garagev1alpha1.GarageCluster) []corev1.P
 	}
 
 	// Set data storage class
+	// Priority: data.volume.storageClassName > data.storageClassName > dataStorageClassName
 	if cluster.Spec.Storage.DataStorageClassName != nil {
 		dataPVC.Spec.StorageClassName = cluster.Spec.Storage.DataStorageClassName
-	} else if cluster.Spec.Storage.DataStorage != nil &&
-		cluster.Spec.Storage.DataStorage.Volume != nil &&
-		cluster.Spec.Storage.DataStorage.Volume.StorageClassName != nil {
-		dataPVC.Spec.StorageClassName = cluster.Spec.Storage.DataStorage.Volume.StorageClassName
+	}
+	if cluster.Spec.Storage.DataStorage != nil {
+		if cluster.Spec.Storage.DataStorage.StorageClassName != nil {
+			dataPVC.Spec.StorageClassName = cluster.Spec.Storage.DataStorage.StorageClassName
+		}
+		if cluster.Spec.Storage.DataStorage.Volume != nil &&
+			cluster.Spec.Storage.DataStorage.Volume.StorageClassName != nil {
+			dataPVC.Spec.StorageClassName = cluster.Spec.Storage.DataStorage.Volume.StorageClassName
+		}
 	}
 
 	return []corev1.PersistentVolumeClaim{metadataPVC, dataPVC}
