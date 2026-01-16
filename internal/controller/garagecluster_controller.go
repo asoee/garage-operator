@@ -132,6 +132,18 @@ func (r *GarageClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// Don't fail reconciliation, just log and continue
 	}
 
+	// Connect to remote clusters for multi-cluster federation
+	if err := r.reconcileFederation(ctx, cluster); err != nil {
+		log.Error(err, "Failed to reconcile federation (will retry)")
+		// Don't fail reconciliation, just log
+	}
+
+	// Handle operational annotations
+	if err := r.handleOperationalAnnotations(ctx, cluster); err != nil {
+		log.Error(err, "Failed to handle operational annotation")
+		// Don't fail reconciliation, just log
+	}
+
 	// Update status with cluster health
 	return r.updateStatusFromCluster(ctx, cluster)
 }
@@ -420,18 +432,24 @@ func writeRPCConfig(config *strings.Builder, cluster *garagev1alpha1.GarageClust
 		fmt.Fprintf(config, "rpc_timeout_msec = %d\n", *cluster.Spec.Network.RPCTimeoutMs)
 	}
 
-	// Bootstrap peers
-	headlessService := cluster.Name + "-headless"
-	headlessPeer := fmt.Sprintf("%s.%s.svc.cluster.local:%d", headlessService, cluster.Namespace, rpcPort)
-
-	allPeers := []string{headlessPeer}
-	allPeers = append(allPeers, cluster.Spec.Network.BootstrapPeers...)
-
-	quotedPeers := make([]string, 0, len(allPeers))
-	for _, peer := range allPeers {
-		quotedPeers = append(quotedPeers, fmt.Sprintf("\"%s\"", peer))
+	// Bootstrap peers for multi-cluster federation.
+	// IMPORTANT: Garage REQUIRES the format "<nodeid>@<addr>:<port>" where nodeid is
+	// the 64-character hex node ID. Peers without node IDs are silently ignored.
+	// For multi-cluster setups:
+	//   1. Discover node IDs via 'garage node id' or Admin API on each cluster
+	//   2. Configure bootstrap_peers with full "<nodeid>@<addr>:<port>" format
+	//   3. Use ExternalName services for DNS resolution across clusters
+	// The operator handles intra-cluster node discovery via Admin API; bootstrap peers
+	// are primarily for initial cross-cluster connectivity.
+	if len(cluster.Spec.Network.BootstrapPeers) > 0 {
+		quotedPeers := make([]string, 0, len(cluster.Spec.Network.BootstrapPeers))
+		for _, peer := range cluster.Spec.Network.BootstrapPeers {
+			quotedPeers = append(quotedPeers, fmt.Sprintf("\"%s\"", peer))
+		}
+		fmt.Fprintf(config, "bootstrap_peers = [%s]\n", strings.Join(quotedPeers, ", "))
+	} else {
+		fmt.Fprintf(config, "bootstrap_peers = []\n")
 	}
-	fmt.Fprintf(config, "bootstrap_peers = [%s]\n", strings.Join(quotedPeers, ", "))
 }
 
 func writeS3APIConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
@@ -1055,8 +1073,38 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 		return err
 	}
 
+	// Check if update is needed by comparing key fields
+	needsUpdate := false
+
+	// Check replicas
+	if existing.Spec.Replicas == nil || *existing.Spec.Replicas != *sts.Spec.Replicas {
+		needsUpdate = true
+	}
+
+	// Check config hash annotation (indicates config/volume changes)
+	existingConfigHash := existing.Spec.Template.Annotations["garage.rajsingh.info/config-hash"]
+	newConfigHash := sts.Spec.Template.Annotations["garage.rajsingh.info/config-hash"]
+	if existingConfigHash != newConfigHash {
+		log.Info("Config hash changed, updating StatefulSet", "old", existingConfigHash, "new", newConfigHash)
+		needsUpdate = true
+	}
+
+	// Check volume count (detects secret volume additions/removals)
+	if len(existing.Spec.Template.Spec.Volumes) != len(sts.Spec.Template.Spec.Volumes) {
+		log.Info("Volume count changed, updating StatefulSet",
+			"old", len(existing.Spec.Template.Spec.Volumes),
+			"new", len(sts.Spec.Template.Spec.Volumes))
+		needsUpdate = true
+	}
+
+	if !needsUpdate {
+		log.V(1).Info("StatefulSet is up to date", "name", stsName)
+		return nil
+	}
+
 	existing.Spec.Replicas = sts.Spec.Replicas
 	existing.Spec.Template = sts.Spec.Template
+	log.Info("Updating StatefulSet", "name", stsName)
 	return r.Update(ctx, existing)
 }
 
@@ -1472,8 +1520,8 @@ func (r *GarageClusterReconciler) bootstrapCluster(ctx context.Context, cluster 
 	rpcPort := getRPCPort(cluster)
 
 	nodes := discoverNodes(ctx, runningPods, adminToken, adminPort)
-	if len(nodes) < 2 {
-		log.V(1).Info("Not enough nodes discovered yet", "count", len(nodes))
+	if len(nodes) == 0 {
+		log.V(1).Info("No nodes discovered yet from running pods")
 		return nil
 	}
 
@@ -1554,6 +1602,155 @@ func (r *GarageClusterReconciler) calculateNodeCapacity(cluster *garagev1alpha1.
 	return defaultCapacity
 }
 
+// reconcileFederation connects this cluster to remote Garage clusters.
+// It queries remote Admin APIs to discover node IDs and connects them.
+func (r *GarageClusterReconciler) reconcileFederation(ctx context.Context, cluster *garagev1alpha1.GarageCluster) error {
+	log := logf.FromContext(ctx)
+
+	if len(cluster.Spec.RemoteClusters) == 0 {
+		return nil
+	}
+
+	// Get local admin client
+	adminToken, err := r.getAdminToken(ctx, cluster)
+	if err != nil || adminToken == "" {
+		log.V(1).Info("Admin token not available, skipping federation")
+		return nil
+	}
+
+	adminPort := getAdminPort(cluster)
+	localEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", cluster.Name, cluster.Namespace, adminPort)
+	localClient := garage.NewClient(localEndpoint, adminToken)
+
+	// Check if local cluster is healthy enough for federation
+	localHealth, err := localClient.GetClusterHealth(ctx)
+	if err != nil {
+		log.V(1).Info("Local cluster not ready for federation", "error", err)
+		return nil
+	}
+	if localHealth.Status != "healthy" && localHealth.Status != "degraded" {
+		log.V(1).Info("Local cluster not healthy enough for federation", "status", localHealth.Status)
+		return nil
+	}
+
+	// Process each remote cluster
+	for _, remote := range cluster.Spec.RemoteClusters {
+		if err := r.connectToRemoteCluster(ctx, cluster, localClient, remote); err != nil {
+			log.Error(err, "Failed to connect to remote cluster", "name", remote.Name)
+			// Continue with other remotes
+		}
+	}
+
+	return nil
+}
+
+// connectToRemoteCluster discovers nodes from a remote cluster and connects them.
+func (r *GarageClusterReconciler) connectToRemoteCluster(
+	ctx context.Context,
+	cluster *garagev1alpha1.GarageCluster,
+	localClient *garage.Client,
+	remote garagev1alpha1.RemoteClusterConfig,
+) error {
+	log := logf.FromContext(ctx)
+
+	// Get remote admin token
+	remoteToken, err := r.getRemoteAdminToken(ctx, cluster, remote)
+	if err != nil {
+		return fmt.Errorf("failed to get remote admin token: %w", err)
+	}
+
+	// Determine remote endpoint
+	remoteEndpoint := remote.Connection.AdminAPIEndpoint
+	if remoteEndpoint == "" {
+		log.V(1).Info("No admin API endpoint configured for remote cluster", "name", remote.Name)
+		return nil
+	}
+
+	log.Info("Connecting to remote cluster", "name", remote.Name, "endpoint", remoteEndpoint)
+
+	// Query remote cluster for nodes
+	remoteClient := garage.NewClient(remoteEndpoint, remoteToken)
+	remoteStatus, err := remoteClient.GetClusterStatus(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get remote cluster status: %w", err)
+	}
+
+	// Connect to each node in the remote cluster
+	connectedCount := 0
+	for _, node := range remoteStatus.Nodes {
+		if node.Role == nil {
+			continue // Skip nodes not in layout
+		}
+
+		// Determine the address to use for connection
+		var addr string
+		if node.Address != nil && *node.Address != "" {
+			// Use the node's advertised address
+			addr = *node.Address
+		} else {
+			log.V(1).Info("Remote node has no address", "nodeID", node.ID[:16]+"...")
+			continue
+		}
+
+		// Connect local cluster to this remote node
+		result, err := localClient.ConnectNode(ctx, node.ID, addr)
+		if err != nil {
+			log.V(1).Info("Failed to connect to remote node", "nodeID", node.ID[:16]+"...", "addr", addr, "error", err)
+			continue
+		}
+
+		if result.Success {
+			connectedCount++
+			log.V(1).Info("Connected to remote node", "nodeID", node.ID[:16]+"...", "addr", addr)
+		} else {
+			errMsg := "unknown"
+			if result.Error != nil {
+				errMsg = *result.Error
+			}
+			log.V(1).Info("Failed to connect to remote node", "nodeID", node.ID[:16]+"...", "addr", addr, "error", errMsg)
+		}
+	}
+
+	if connectedCount > 0 {
+		log.Info("Connected to remote cluster nodes", "name", remote.Name, "connected", connectedCount)
+	}
+
+	return nil
+}
+
+// getRemoteAdminToken retrieves the admin token for a remote cluster.
+func (r *GarageClusterReconciler) getRemoteAdminToken(
+	ctx context.Context,
+	cluster *garagev1alpha1.GarageCluster,
+	remote garagev1alpha1.RemoteClusterConfig,
+) (string, error) {
+	// Use remote-specific token if configured
+	if remote.Connection.AdminTokenSecretRef != nil {
+		secret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{
+			Name:      remote.Connection.AdminTokenSecretRef.Name,
+			Namespace: cluster.Namespace,
+		}, secret); err != nil {
+			return "", err
+		}
+
+		key := "admin-token"
+		if remote.Connection.AdminTokenSecretRef.Key != "" {
+			key = remote.Connection.AdminTokenSecretRef.Key
+		}
+
+		if secret.Data != nil {
+			if tokenData, ok := secret.Data[key]; ok {
+				return string(tokenData), nil
+			}
+		}
+		return "", fmt.Errorf("admin token key %s not found in secret", key)
+	}
+
+	// Fall back to local admin token (for shared-secret setups)
+	return r.getAdminToken(ctx, cluster)
+}
+
 // getAdminToken retrieves the admin token from the configured secret
 func (r *GarageClusterReconciler) getAdminToken(ctx context.Context, cluster *garagev1alpha1.GarageCluster) (string, error) {
 	if cluster.Spec.Admin == nil || cluster.Spec.Admin.AdminTokenSecretRef == nil {
@@ -1581,6 +1778,96 @@ func (r *GarageClusterReconciler) getAdminToken(ctx context.Context, cluster *ga
 		return "", nil
 	}
 	return string(tokenData), nil
+}
+
+// Annotation keys for operational commands
+const (
+	AnnotationConnectNodes = "garage.rajsingh.info/connect-nodes"
+)
+
+// handleOperationalAnnotations processes annotations that trigger operational commands.
+// These annotations are removed after processing to prevent re-execution.
+func (r *GarageClusterReconciler) handleOperationalAnnotations(ctx context.Context, cluster *garagev1alpha1.GarageCluster) error {
+	log := logf.FromContext(ctx)
+
+	if cluster.Annotations == nil {
+		return nil
+	}
+
+	// Handle connect-nodes annotation: "nodeId@addr:port,nodeId2@addr2:port2,..."
+	if connectNodesVal, ok := cluster.Annotations[AnnotationConnectNodes]; ok && connectNodesVal != "" {
+		if err := r.handleConnectNodes(ctx, cluster, connectNodesVal); err != nil {
+			return err
+		}
+
+		// Remove annotation after processing
+		delete(cluster.Annotations, AnnotationConnectNodes)
+		if err := r.Update(ctx, cluster); err != nil {
+			log.Error(err, "Failed to remove connect-nodes annotation")
+			return err
+		}
+		log.Info("Processed and removed connect-nodes annotation")
+	}
+
+	return nil
+}
+
+// handleConnectNodes connects the cluster to external nodes specified in the annotation.
+// Format: "nodeId@addr:port,nodeId2@addr2:port2,..."
+// This is useful for multi-cluster federation where node IDs are known.
+func (r *GarageClusterReconciler) handleConnectNodes(ctx context.Context, cluster *garagev1alpha1.GarageCluster, connections string) error {
+	log := logf.FromContext(ctx)
+
+	adminToken, err := r.getAdminToken(ctx, cluster)
+	if err != nil || adminToken == "" {
+		return fmt.Errorf("admin token required for connect-nodes operation")
+	}
+
+	adminPort := getAdminPort(cluster)
+	adminEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", cluster.Name, cluster.Namespace, adminPort)
+	garageClient := garage.NewClient(adminEndpoint, adminToken)
+
+	// Parse comma-separated connection strings
+	for _, conn := range strings.Split(connections, ",") {
+		conn = strings.TrimSpace(conn)
+		if conn == "" {
+			continue
+		}
+
+		// Parse nodeId@addr:port format
+		atIdx := strings.Index(conn, "@")
+		if atIdx == -1 {
+			log.Info("Skipping invalid connection string (missing @)", "connection", conn)
+			continue
+		}
+
+		nodeID := conn[:atIdx]
+		addr := conn[atIdx+1:]
+
+		if nodeID == "" || addr == "" {
+			log.Info("Skipping invalid connection string", "connection", conn)
+			continue
+		}
+
+		log.Info("Connecting to external node", "nodeID", nodeID[:16]+"...", "addr", addr)
+		result, err := garageClient.ConnectNode(ctx, nodeID, addr)
+		if err != nil {
+			log.Error(err, "Failed to connect to node", "nodeID", nodeID[:16]+"...", "addr", addr)
+			continue
+		}
+
+		if result.Success {
+			log.Info("Successfully connected to external node", "nodeID", nodeID[:16]+"...", "addr", addr)
+		} else {
+			errMsg := "unknown"
+			if result.Error != nil {
+				errMsg = *result.Error
+			}
+			log.Info("Connection to external node failed", "nodeID", nodeID[:16]+"...", "addr", addr, "error", errMsg)
+		}
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
