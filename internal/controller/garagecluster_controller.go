@@ -918,18 +918,31 @@ func buildVolumeClaimTemplates(cluster *garagev1alpha1.GarageCluster) []corev1.P
 	return []corev1.PersistentVolumeClaim{pvc}
 }
 
-// buildHealthProbes returns readiness and liveness probes for Garage
-func buildHealthProbes(cluster *garagev1alpha1.GarageCluster) (*corev1.Probe, *corev1.Probe) {
+// buildHealthProbes returns startup, readiness and liveness probes for Garage
+func buildHealthProbes(cluster *garagev1alpha1.GarageCluster) (*corev1.Probe, *corev1.Probe, *corev1.Probe) {
 	adminPort := int32(3903)
 	if cluster.Spec.Admin != nil && cluster.Spec.Admin.BindPort != 0 {
 		adminPort = cluster.Spec.Admin.BindPort
+	}
+
+	// Startup probe: allows time for multi-cluster federation to connect nodes
+	// and apply layout before liveness/readiness probes kick in.
+	// Uses TCP check (not /health) because /health returns 503 before layout is applied.
+	startupProbe := &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(adminPort)},
+		},
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       10,
+		TimeoutSeconds:      5,
+		FailureThreshold:    60, // 60 * 10s = 10 minutes for federation
 	}
 
 	readinessProbe := &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{Path: "/health", Port: intstr.FromInt32(adminPort)},
 		},
-		InitialDelaySeconds: 10,
+		InitialDelaySeconds: 0, // No delay after startup succeeds
 		PeriodSeconds:       10,
 		TimeoutSeconds:      5,
 		FailureThreshold:    3,
@@ -937,15 +950,15 @@ func buildHealthProbes(cluster *garagev1alpha1.GarageCluster) (*corev1.Probe, *c
 
 	livenessProbe := &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{Path: "/health", Port: intstr.FromInt32(adminPort)},
+			TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(adminPort)},
 		},
-		InitialDelaySeconds: 30,
+		InitialDelaySeconds: 0, // No delay after startup succeeds
 		PeriodSeconds:       30,
 		TimeoutSeconds:      10,
 		FailureThreshold:    5,
 	}
 
-	return readinessProbe, livenessProbe
+	return startupProbe, readinessProbe, livenessProbe
 }
 
 // reconcileStatefulSet creates/updates the StatefulSet for Garage pods.
@@ -968,7 +981,7 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 	containerPorts := buildContainerPorts(cluster)
 	volumes, volumeMounts := buildVolumesAndMounts(cluster)
 	volumeClaimTemplates := buildVolumeClaimTemplates(cluster)
-	readinessProbe, livenessProbe := buildHealthProbes(cluster)
+	startupProbe, readinessProbe, livenessProbe := buildHealthProbes(cluster)
 
 	env := []corev1.EnvVar{{
 		Name:      "GARAGE_NODE_HOST",
@@ -997,6 +1010,7 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 		VolumeMounts:    volumeMounts,
 		Env:             env,
 		Resources:       cluster.Spec.Resources,
+		StartupProbe:    startupProbe,
 		ReadinessProbe:  readinessProbe,
 		LivenessProbe:   livenessProbe,
 	}
