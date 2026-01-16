@@ -1,0 +1,88 @@
+# Minimal test resources for garage-operator
+# Apply with: kubectl apply -f hack/test-resources.yaml
+---
+# Admin token for the cluster
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageAdminToken
+metadata:
+  name: garage-admin
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  secretTemplate:
+    name: garage-admin-token
+---
+# Minimal Garage cluster (3 nodes)
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageCluster
+metadata:
+  name: garage
+  namespace: garage-system
+spec:
+  replicas: 3
+
+  # Container image
+  image: dxflrs/garage:v2.1.0
+
+  # Replication settings
+  replication:
+    factor: 3
+
+  # Storage configuration
+  storage:
+    metadata:
+      size: 1Gi
+    data:
+      volume:
+        size: 10Gi
+
+  # Network configuration (required)
+  network:
+    rpcBindPort: 3901
+
+  # Admin API configuration
+  admin:
+    enabled: true
+    adminTokenSecretRef:
+      name: garage-admin-token
+      key: admin-token
+
+  # S3 API configuration
+  s3Api:
+    enabled: true
+    region: garage
+
+---
+# Test bucket
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageBucket
+metadata:
+  name: test-bucket
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  globalAlias: test-bucket
+  quotas:
+    maxSize: 1Gi
+    maxObjects: 1000
+---
+# Test access key with permissions to the bucket
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: test-key
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  name: test-application-key
+  bucketPermissions:
+    - bucketRef: test-bucket
+      read: true
+      write: true
+  secretTemplate:
+    name: test-s3-credentials
+    includeEndpoint: true
+    includeRegion: true

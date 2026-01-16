@@ -1,0 +1,73 @@
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  labels:
+    app.kubernetes.io/name: garage-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: app-key
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+
+  name: "Application Key"
+
+  # Secret template for generated credentials
+  secretTemplate:
+    name: app-s3-credentials
+    labels:
+      app: my-app
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+    endpointKey: S3_ENDPOINT
+    regionKey: AWS_REGION
+    includeEndpoint: true
+    includeRegion: true
+
+  # Bucket permissions
+  bucketPermissions:
+    - bucketRef: my-bucket
+      read: true
+      write: true
+---
+# Admin key example
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: admin-key
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+
+  name: "Admin Key"
+
+  secretTemplate:
+    name: admin-s3-credentials
+
+  # Grant admin permissions
+  adminScope:
+    createBucket: true
+    readClusterInfo: true
+---
+# Import existing key example
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: imported-key
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+
+  name: "Imported Key"
+
+  # Import from existing secret
+  importKey:
+    secretRef:
+      name: existing-credentials
+      namespace: garage-system
+
+  bucketPermissions:
+    - globalAlias: shared-bucket
+      read: true

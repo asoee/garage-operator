@@ -1,0 +1,28 @@
+# Kind cluster configuration for garage-operator development
+# Creates a 3-node cluster suitable for testing Garage deployments
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: garage-operator-dev
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # S3 API
+      - containerPort: 30900
+        hostPort: 3900
+        protocol: TCP
+      # Admin API
+      - containerPort: 30903
+        hostPort: 3903
+        protocol: TCP
+      # Web Gateway
+      - containerPort: 30902
+        hostPort: 3902
+        protocol: TCP
+  - role: worker
+  - role: worker

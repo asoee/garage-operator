@@ -1,0 +1,85 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - persistentvolumeclaims
+  - secrets
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - garage.rajsingh.info
+  resources:
+  - garageadmintokens
+  - garagebuckets
+  - garageclusters
+  - garagekeys
+  - garagenodes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - garage.rajsingh.info
+  resources:
+  - garageadmintokens/finalizers
+  - garagebuckets/finalizers
+  - garageclusters/finalizers
+  - garagekeys/finalizers
+  - garagenodes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - garage.rajsingh.info
+  resources:
+  - garageadmintokens/status
+  - garagebuckets/status
+  - garageclusters/status
+  - garagekeys/status
+  - garagenodes/status
+  verbs:
+  - get
+  - patch
+  - update

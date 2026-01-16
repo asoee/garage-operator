@@ -1,0 +1,174 @@
+# Default values for garage-operator
+# This is a YAML-formatted file.
+
+# -- Number of operator replicas (typically 1 with leader election)
+replicaCount: 1
+
+image:
+  # -- Container image repository
+  repository: ghcr.io/rajsinghtech/garage-operator
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag (default is the chart appVersion)
+  tag: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full name
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a ServiceAccount
+  create: true
+  # -- Annotations to add to the ServiceAccount
+  annotations: {}
+  # -- ServiceAccount name (generated if not set and create is true)
+  name: ""
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod labels
+podLabels: {}
+
+# Pod security context
+podSecurityContext:
+  # -- Run as non-root user
+  runAsNonRoot: true
+  # -- Seccomp profile type
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container security context
+securityContext:
+  # -- Read-only root filesystem
+  readOnlyRootFilesystem: true
+  # -- Disallow privilege escalation
+  allowPrivilegeEscalation: false
+  # -- Drop all capabilities
+  capabilities:
+    drop:
+      - "ALL"
+
+# Resource requests and limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# Leader election configuration
+leaderElection:
+  # -- Enable leader election for HA deployments
+  enabled: true
+
+# Health probes configuration
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8081
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8081
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# Metrics configuration
+metrics:
+  # -- Enable metrics endpoint
+  enabled: true
+  # -- Metrics bind address (port)
+  bindAddress: ":8443"
+  service:
+    # -- Create metrics service
+    enabled: true
+    # -- Metrics service type
+    type: ClusterIP
+    # -- Metrics service port
+    port: 8443
+
+# ServiceMonitor for Prometheus Operator
+serviceMonitor:
+  # -- Create ServiceMonitor resource
+  enabled: false
+  # -- Additional labels for ServiceMonitor
+  labels: {}
+  # -- Metrics scrape interval
+  interval: 30s
+  # -- Metrics scrape timeout
+  scrapeTimeout: 10s
+  # -- Use HTTPS for scraping
+  scheme: https
+  # -- TLS configuration for metrics endpoint
+  tlsConfig:
+    insecureSkipVerify: true
+  # -- Namespace for ServiceMonitor (defaults to release namespace)
+  namespace: ""
+
+# Network policy configuration
+networkPolicy:
+  # -- Create NetworkPolicy to protect metrics endpoint
+  enabled: false
+  # -- Label selector for namespaces allowed to access metrics
+  allowedNamespaceSelector:
+    matchLabels:
+      metrics: enabled
+
+# Webhook configuration (requires cert-manager)
+webhooks:
+  # -- Enable admission webhooks
+  enabled: false
+  # -- Failure policy for webhooks (Fail or Ignore)
+  failurePolicy: Fail
+  # Certificate configuration for webhooks
+  certManager:
+    # -- Use cert-manager for webhook certificates
+    enabled: true
+    # -- Duration of webhook certificates
+    duration: 8760h  # 1 year
+    # -- Renew certificates before expiry
+    renewBefore: 720h  # 30 days
+    # -- Issuer kind (Issuer or ClusterIssuer)
+    issuerKind: Issuer
+    # -- Issuer name (creates self-signed if empty)
+    issuerName: ""
+
+# Node selector for operator pods
+nodeSelector: {}
+
+# Tolerations for operator pods
+tolerations: []
+
+# Affinity rules for operator pods
+affinity: {}
+
+# -- Pod topology spread constraints
+topologySpreadConstraints: []
+
+# -- Priority class name
+priorityClassName: ""
+
+# -- Termination grace period in seconds
+terminationGracePeriodSeconds: 10
+
+# CRD installation
+crds:
+  # -- Install CRDs with Helm
+  install: true
+  # -- Keep CRDs on chart uninstall
+  keep: true
+  # -- Annotations for CRDs
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  # -- Create RBAC resources
+  create: true

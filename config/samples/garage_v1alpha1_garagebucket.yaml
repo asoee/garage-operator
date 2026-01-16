@@ -1,0 +1,71 @@
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageBucket
+metadata:
+  labels:
+    app.kubernetes.io/name: garage-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: my-bucket
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+
+  # Bucket quotas
+  quotas:
+    maxSize: 10Gi
+    maxObjects: 100000
+
+  # CORS configuration
+  cors:
+    - id: allow-all
+      allowedOrigins:
+        - "*"
+      allowedMethods:
+        - GET
+        - PUT
+        - POST
+        - DELETE
+        - HEAD
+      allowedHeaders:
+        - "*"
+      maxAgeSeconds: 3600
+
+  # Lifecycle rules
+  lifecycle:
+    - id: cleanup-temp
+      enabled: true
+      filter:
+        prefix: "temp/"
+      expiration:
+        days: 7
+    - id: abort-incomplete-uploads
+      enabled: true
+      abortIncompleteMultipartUpload:
+        daysAfterInitiation: 1
+
+  # Key permissions
+  keyPermissions:
+    - keyRef: app-key
+      read: true
+      write: true
+---
+# Website bucket example
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageBucket
+metadata:
+  name: website-bucket
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+
+  website:
+    enabled: true
+    indexDocument: index.html
+    errorDocument: error.html
+
+  # Public read access
+  keyPermissions:
+    - keyRef: website-key
+      read: true
+      owner: true

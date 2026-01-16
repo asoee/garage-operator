@@ -1,0 +1,49 @@
+apiVersion: v2
+name: garage-operator
+description: A Kubernetes operator for managing Garage distributed S3-compatible object storage
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/rajsinghtech/garage-operator
+sources:
+  - https://github.com/rajsinghtech/garage-operator
+maintainers:
+  - name: rajsinghtech
+    url: https://github.com/rajsinghtech
+keywords:
+  - garage
+  - s3
+  - object-storage
+  - kubernetes
+  - operator
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Full Lifecycle
+  artifacthub.io/crds: |
+    - kind: GarageCluster
+      version: v1alpha1
+      name: garageclusters.garage.rajsingh.info
+      displayName: Garage Cluster
+      description: Manages Garage cluster deployments and multi-cluster federation
+    - kind: GarageBucket
+      version: v1alpha1
+      name: garagebuckets.garage.rajsingh.info
+      displayName: Garage Bucket
+      description: Manages S3 buckets with quotas and website hosting
+    - kind: GarageKey
+      version: v1alpha1
+      name: garagekeys.garage.rajsingh.info
+      displayName: Garage Key
+      description: Manages S3 access keys with bucket permissions
+    - kind: GarageNode
+      version: v1alpha1
+      name: garagenodes.garage.rajsingh.info
+      displayName: Garage Node
+      description: Manages node layout assignments
+    - kind: GarageAdminToken
+      version: v1alpha1
+      name: garageadmintokens.garage.rajsingh.info
+      displayName: Garage Admin Token
+      description: Manages admin API tokens

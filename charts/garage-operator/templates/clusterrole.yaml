@@ -1,0 +1,106 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "garage-operator.managerRoleName" . }}
+  labels:
+    {{- include "garage-operator.labels" . | nindent 4 }}
+rules:
+# Core resources
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - persistentvolumeclaims
+  - secrets
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+# Apps resources
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Policy resources for PodDisruptionBudget
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Garage custom resources
+- apiGroups:
+  - garage.rajsingh.info
+  resources:
+  - garageadmintokens
+  - garagebuckets
+  - garageclusters
+  - garagekeys
+  - garagenodes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Finalizers for Garage resources
+- apiGroups:
+  - garage.rajsingh.info
+  resources:
+  - garageadmintokens/finalizers
+  - garagebuckets/finalizers
+  - garageclusters/finalizers
+  - garagekeys/finalizers
+  - garagenodes/finalizers
+  verbs:
+  - update
+# Status updates for Garage resources
+- apiGroups:
+  - garage.rajsingh.info
+  resources:
+  - garageadmintokens/status
+  - garagebuckets/status
+  - garageclusters/status
+  - garagekeys/status
+  - garagenodes/status
+  verbs:
+  - get
+  - patch
+  - update
+{{- end }}

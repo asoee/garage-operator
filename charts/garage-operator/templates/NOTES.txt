@@ -1,0 +1,96 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+## Getting Started
+
+The garage-operator is now running and watching for Garage custom resources.
+
+### Create a Garage Cluster
+
+Create a GarageCluster resource to deploy Garage:
+
+  cat <<EOF | kubectl apply -f -
+  apiVersion: garage.rajsingh.info/v1alpha1
+  kind: GarageCluster
+  metadata:
+    name: my-garage
+    namespace: default
+  spec:
+    replicas: 3
+    zone: us-east-1
+    storage:
+      dataSize: 100Gi
+  EOF
+
+### Create a Bucket
+
+  cat <<EOF | kubectl apply -f -
+  apiVersion: garage.rajsingh.info/v1alpha1
+  kind: GarageBucket
+  metadata:
+    name: my-bucket
+    namespace: default
+  spec:
+    clusterRef:
+      name: my-garage
+  EOF
+
+### Create an Access Key
+
+  cat <<EOF | kubectl apply -f -
+  apiVersion: garage.rajsingh.info/v1alpha1
+  kind: GarageKey
+  metadata:
+    name: my-key
+    namespace: default
+  spec:
+    clusterRef:
+      name: my-garage
+    bucketPermissions:
+      - bucketRef: my-bucket
+        read: true
+        write: true
+  EOF
+
+### Check Status
+
+View all Garage resources:
+
+  kubectl get garageclusters,garagebuckets,garagekeys,garagenodes
+
+View operator logs:
+
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "garage-operator.name" . }} -f
+
+{{- if .Values.metrics.enabled }}
+
+## Metrics
+
+Metrics are exposed on port {{ .Values.metrics.service.port }}.
+{{- if .Values.serviceMonitor.enabled }}
+A ServiceMonitor has been created for Prometheus Operator scraping.
+{{- else }}
+To enable automatic scraping with Prometheus Operator, set serviceMonitor.enabled=true.
+{{- end }}
+{{- end }}
+
+{{- if .Values.webhooks.enabled }}
+
+## Webhooks
+
+Admission webhooks are enabled for validation.
+{{- if .Values.webhooks.certManager.enabled }}
+Certificates are managed by cert-manager.
+{{- end }}
+{{- end }}
+
+## Documentation
+
+For more information, visit:
+  https://github.com/rajsinghtech/garage-operator

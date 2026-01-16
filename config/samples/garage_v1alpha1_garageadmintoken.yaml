@@ -1,0 +1,81 @@
+---
+# Full admin token with no restrictions
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageAdminToken
+metadata:
+  name: admin-full
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  name: Full Admin Token
+  neverExpires: true
+  secretTemplate:
+    name: garage-admin-full
+    tokenKey: admin-token
+    includeEndpoint: true
+---
+# Read-only admin token for monitoring
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageAdminToken
+metadata:
+  name: admin-readonly
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  name: Read-Only Monitoring Token
+  expiration: "2027-12-31T23:59:59Z"
+  scope:
+    readOnly: true
+  secretTemplate:
+    name: garage-admin-readonly
+---
+# Scoped token for bucket management only
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageAdminToken
+metadata:
+  name: admin-bucket-manager
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  name: Bucket Manager Token
+  scope:
+    allowedOperations:
+      - ListBuckets
+      - GetBucketInfo
+      - CreateBucket
+      - UpdateBucket
+      - DeleteBucket
+      - ListKeys
+      - GetKeyInfo
+      - AllowBucketKey
+      - DenyBucketKey
+    deniedOperations:
+      - UpdateClusterLayout
+      - ApplyClusterLayout
+  secretTemplate:
+    name: garage-bucket-manager-token
+---
+# Scoped token for specific buckets only
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageAdminToken
+metadata:
+  name: admin-team-buckets
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  name: Team Bucket Admin
+  scope:
+    bucketScope:
+      - team-data
+      - team-backups
+    allowedOperations:
+      - GetBucketInfo
+      - UpdateBucket
+      - AllowBucketKey
+      - DenyBucketKey
+  secretTemplate:
+    name: garage-team-admin-token

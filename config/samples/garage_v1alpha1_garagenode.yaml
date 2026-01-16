@@ -1,0 +1,82 @@
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageNode
+metadata:
+  labels:
+    app.kubernetes.io/name: garage-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: garage-node-0
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+
+  # Zone assignment for fault tolerance
+  zone: zone-a
+
+  # Storage capacity
+  capacity: 100Gi
+
+  # Auto-discover node ID from pod
+  podSelector:
+    statefulSetIndex: 0
+---
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageNode
+metadata:
+  name: garage-node-1
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  zone: zone-b
+  capacity: 100Gi
+  podSelector:
+    statefulSetIndex: 1
+---
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageNode
+metadata:
+  name: garage-node-2
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  zone: zone-c
+  capacity: 100Gi
+  podSelector:
+    statefulSetIndex: 2
+---
+# Gateway node (no storage)
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageNode
+metadata:
+  name: garage-gateway
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+  zone: gateway
+  gateway: true
+  podSelector:
+    labels:
+      app.kubernetes.io/component: gateway
+---
+# External node (multi-cluster federation)
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageNode
+metadata:
+  name: external-dc2-node
+  namespace: garage-system
+spec:
+  clusterRef:
+    name: garage
+
+  # Specify node ID directly for external nodes
+  nodeId: "563e1ac825ee3323aa441e72c26d1030d6d4414aeb3dd25287c531e7fc2bc95d"
+
+  zone: dc2
+  capacity: 1Ti
+
+  external:
+    address: garage-dc2.example.com
+    port: 3901

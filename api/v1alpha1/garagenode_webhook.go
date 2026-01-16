@@ -1,0 +1,209 @@
+/*
+Copyright 2026 Raj Singh.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+)
+
+var garagenodelog = logf.Log.WithName("garagenode-resource")
+
+// SetupWebhookWithManager sets up the webhook with the Manager.
+func (r *GarageNode) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewWebhookManagedBy(mgr).
+		For(r).
+		WithDefaulter(&GarageNodeDefaulter{}).
+		WithValidator(&GarageNodeValidator{}).
+		Complete()
+}
+
+// +kubebuilder:webhook:path=/mutate-garage-rajsingh-info-v1alpha1-garagenode,mutating=true,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagenodes,verbs=create;update,versions=v1alpha1,name=mgaragenode.kb.io,admissionReviewVersions=v1
+
+var _ webhook.CustomDefaulter = &GarageNodeDefaulter{}
+
+// GarageNodeDefaulter handles defaulting for GarageNode.
+type GarageNodeDefaulter struct{}
+
+// Default implements webhook.CustomDefaulter so a webhook will be registered for the type.
+func (d *GarageNodeDefaulter) Default(ctx context.Context, obj runtime.Object) error {
+	r, ok := obj.(*GarageNode)
+	if !ok {
+		return fmt.Errorf("expected GarageNode but got %T", obj)
+	}
+
+	garagenodelog.Info("default", "name", r.Name)
+
+	// Set default external port
+	if r.Spec.External != nil && r.Spec.External.Port == 0 {
+		r.Spec.External.Port = 3901
+	}
+
+	return nil
+}
+
+// +kubebuilder:webhook:path=/validate-garage-rajsingh-info-v1alpha1-garagenode,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagenodes,verbs=create;update,versions=v1alpha1,name=vgaragenode.kb.io,admissionReviewVersions=v1
+
+var _ webhook.CustomValidator = &GarageNodeValidator{}
+
+// GarageNodeValidator handles validation for GarageNode.
+type GarageNodeValidator struct{}
+
+// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
+func (v *GarageNodeValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	r, ok := obj.(*GarageNode)
+	if !ok {
+		return nil, fmt.Errorf("expected GarageNode but got %T", obj)
+	}
+
+	garagenodelog.Info("validate create", "name", r.Name)
+	return r.validateGarageNode()
+}
+
+// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
+func (v *GarageNodeValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	r, ok := newObj.(*GarageNode)
+	if !ok {
+		return nil, fmt.Errorf("expected GarageNode but got %T", newObj)
+	}
+
+	garagenodelog.Info("validate update", "name", r.Name)
+	return r.validateGarageNode()
+}
+
+// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
+func (v *GarageNodeValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	r, ok := obj.(*GarageNode)
+	if !ok {
+		return nil, fmt.Errorf("expected GarageNode but got %T", obj)
+	}
+
+	garagenodelog.Info("validate delete", "name", r.Name)
+	return nil, nil
+}
+
+// validateGarageNode validates the GarageNode spec.
+func (r *GarageNode) validateGarageNode() (admission.Warnings, error) {
+	var warnings admission.Warnings
+
+	// Validate cluster reference
+	if r.Spec.ClusterRef.Name == "" {
+		return warnings, fmt.Errorf("clusterRef.name is required")
+	}
+
+	// Validate zone is not empty
+	if r.Spec.Zone == "" {
+		return warnings, fmt.Errorf("zone is required")
+	}
+
+	// Validate capacity is required if not a gateway node
+	if !r.Spec.Gateway && r.Spec.Capacity == nil {
+		return warnings, fmt.Errorf("capacity is required for storage nodes (set gateway: true for gateway-only nodes)")
+	}
+
+	// Validate capacity is not set for gateway nodes (it would be ignored)
+	if r.Spec.Gateway && r.Spec.Capacity != nil {
+		warnings = append(warnings,
+			"capacity is set but will be ignored for gateway nodes")
+	}
+
+	// Validate nodeId format if specified
+	if r.Spec.NodeID != "" {
+		if err := validateNodeID(r.Spec.NodeID); err != nil {
+			return warnings, err
+		}
+	}
+
+	// Validate external node configuration
+	if r.Spec.External != nil {
+		if err := r.validateExternalNode(); err != nil {
+			return warnings, err
+		}
+	}
+
+	// Validate pod selector
+	if r.Spec.PodSelector != nil {
+		if err := r.validatePodSelector(); err != nil {
+			return warnings, err
+		}
+	}
+
+	// Cannot have both podSelector and external
+	if r.Spec.PodSelector != nil && r.Spec.External != nil {
+		return warnings, fmt.Errorf("cannot specify both podSelector and external - use one or the other")
+	}
+
+	// Warn if neither podSelector, external, nor nodeId is specified
+	if r.Spec.PodSelector == nil && r.Spec.External == nil && r.Spec.NodeID == "" {
+		warnings = append(warnings,
+			"Neither nodeId, podSelector, nor external is specified. "+
+				"The controller will attempt to discover the node ID, but this may be unreliable.")
+	}
+
+	return warnings, nil
+}
+
+// validateNodeID validates the format of a Garage node ID.
+// Node IDs are Ed25519 public keys encoded as 64 hex characters.
+func validateNodeID(nodeID string) error {
+	// Node IDs are 64 hex characters (32 bytes = 256 bits Ed25519 public key)
+	nodeIDPattern := regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
+	if !nodeIDPattern.MatchString(nodeID) {
+		return fmt.Errorf("nodeId must be a 64-character hex string (Ed25519 public key)")
+	}
+	return nil
+}
+
+// validateExternalNode validates external node configuration.
+func (r *GarageNode) validateExternalNode() error {
+	ext := r.Spec.External
+
+	if ext.Address == "" {
+		return fmt.Errorf("external.address is required")
+	}
+
+	// Validate port range
+	if ext.Port < 1 || ext.Port > 65535 {
+		return fmt.Errorf("external.port must be between 1 and 65535")
+	}
+
+	return nil
+}
+
+// validatePodSelector validates pod selector configuration.
+func (r *GarageNode) validatePodSelector() error {
+	sel := r.Spec.PodSelector
+
+	// Must have at least one selector field
+	if sel.Name == "" && len(sel.Labels) == 0 && sel.StatefulSetIndex == nil {
+		return fmt.Errorf("podSelector must specify at least one of: name, labels, or statefulSetIndex")
+	}
+
+	// Validate statefulSetIndex is non-negative
+	if sel.StatefulSetIndex != nil && *sel.StatefulSetIndex < 0 {
+		return fmt.Errorf("podSelector.statefulSetIndex must be non-negative")
+	}
+
+	return nil
+}
