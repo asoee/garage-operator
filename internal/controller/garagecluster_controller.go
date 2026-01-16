@@ -1311,6 +1311,7 @@ type layoutConfig struct {
 	capacity               uint64
 	tags                   []string
 	capacityReservePercent int
+	replicationFactor      int
 }
 
 // getAdminPort returns the configured admin port for the cluster
@@ -1479,7 +1480,36 @@ func assignNewNodesToLayout(ctx context.Context, garageClient *garage.Client, no
 		return nil
 	}
 
-	log.Info("Applying staged layout changes", "stagedCount", len(layout.StagedRoleChanges), "currentVersion", layout.Version)
+	// Count total nodes that will exist after applying (current roles + staged additions - staged removals)
+	totalNodesAfterApply := len(layout.Roles)
+	for _, change := range layout.StagedRoleChanges {
+		if change.Remove {
+			totalNodesAfterApply--
+		} else {
+			// Check if this is a new node or an update to existing
+			isNew := true
+			for _, role := range layout.Roles {
+				if role.ID == change.ID {
+					isNew = false
+					break
+				}
+			}
+			if isNew {
+				totalNodesAfterApply++
+			}
+		}
+	}
+
+	// Check if we have enough nodes for the replication factor
+	if cfg.replicationFactor > 0 && totalNodesAfterApply < cfg.replicationFactor {
+		log.Info("Waiting for more nodes before applying layout",
+			"currentNodes", totalNodesAfterApply,
+			"replicationFactor", cfg.replicationFactor,
+			"stagedCount", len(layout.StagedRoleChanges))
+		return nil // Don't error, just wait for federation to bring more nodes
+	}
+
+	log.Info("Applying staged layout changes", "stagedCount", len(layout.StagedRoleChanges), "totalNodes", totalNodesAfterApply, "currentVersion", layout.Version)
 	newVersion := layout.Version + 1
 	if err := garageClient.ApplyClusterLayout(ctx, newVersion); err != nil {
 		// Handle race condition: another controller may have applied layout changes
@@ -1573,6 +1603,10 @@ func (r *GarageClusterReconciler) bootstrapCluster(ctx context.Context, cluster 
 		zone:                   cluster.Spec.Zone,
 		tags:                   cluster.Spec.DefaultNodeTags,
 		capacityReservePercent: cluster.Spec.CapacityReservePercent,
+		replicationFactor:      3, // Default
+	}
+	if cluster.Spec.Replication.Factor > 0 {
+		cfg.replicationFactor = cluster.Spec.Replication.Factor
 	}
 
 	// Calculate capacity from storage config
