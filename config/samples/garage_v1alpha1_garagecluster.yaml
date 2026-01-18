@@ -19,8 +19,7 @@ spec:
     metadata:
       size: 10Gi
     data:
-      volume:
-        size: 100Gi
+      size: 100Gi
 
   network:
     rpcBindPort: 3901
@@ -69,8 +68,7 @@ spec:
     metadata:
       size: 10Gi
     data:
-      volume:
-        size: 100Gi
+      size: 100Gi
 
   network:
     rpcBindPort: 3901
@@ -140,8 +138,7 @@ spec:
     metadata:
       size: 10Gi
     data:
-      volume:
-        size: 100Gi
+      size: 100Gi
 
   network:
     rpcBindPort: 3901

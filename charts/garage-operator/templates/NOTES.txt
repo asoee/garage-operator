@@ -25,7 +25,8 @@ Create a GarageCluster resource to deploy Garage:
     replicas: 3
     zone: us-east-1
     storage:
-      dataSize: 100Gi
+      data:
+        size: 100Gi
   EOF
 
 ### Create a Bucket

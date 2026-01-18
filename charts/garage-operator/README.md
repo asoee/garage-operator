@@ -97,7 +97,8 @@ spec:
   replicas: 3
   zone: us-east-1
   storage:
-    dataSize: 100Gi
+    data:
+      size: 100Gi
 ```
 
 ### Create a Bucket

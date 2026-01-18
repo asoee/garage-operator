@@ -289,33 +289,13 @@ type ReplicationConfig struct {
 
 // StorageConfig configures storage for metadata and data
 type StorageConfig struct {
-	// MetadataSize is a shorthand for specifying metadata volume size
-	// Use this for simple deployments. For advanced configuration, use Metadata.
+	// Metadata configures metadata storage
 	// +optional
-	MetadataSize *resource.Quantity `json:"metadataSize,omitempty"`
+	Metadata *VolumeConfig `json:"metadata,omitempty"`
 
-	// MetadataStorageClassName is a shorthand for the metadata storage class
+	// Data configures data block storage
 	// +optional
-	MetadataStorageClassName *string `json:"metadataStorageClassName,omitempty"`
-
-	// MetadataStorage configures metadata storage with full customization
-	// Overrides MetadataSize/MetadataStorageClassName if specified
-	// +optional
-	MetadataStorage *VolumeConfig `json:"metadata,omitempty"`
-
-	// DataSize is a shorthand for specifying data volume size
-	// Use this for simple deployments. For advanced configuration, use Data.
-	// +optional
-	DataSize *resource.Quantity `json:"dataSize,omitempty"`
-
-	// DataStorageClassName is a shorthand for the data storage class
-	// +optional
-	DataStorageClassName *string `json:"dataStorageClassName,omitempty"`
-
-	// DataStorage configures data block storage with full customization
-	// Overrides DataSize/DataStorageClassName if specified
-	// +optional
-	DataStorage *DataStorageConfig `json:"data,omitempty"`
+	Data *DataStorageConfig `json:"data,omitempty"`
 
 	// MetadataSnapshotsDir specifies directory for metadata snapshots
 	// +optional
@@ -362,14 +342,13 @@ type VolumeConfig struct {
 	VolumeClaimTemplateSpec *corev1.PersistentVolumeClaimSpec `json:"volumeClaimTemplateSpec,omitempty"`
 }
 
-// DataStorageConfig configures data storage with multiple paths support
+// DataStorageConfig configures data storage
 type DataStorageConfig struct {
-	// Size is a shorthand for specifying data volume size (creates a simple PVC)
-	// Use this for simple deployments. For advanced configuration, use Volume.
+	// Size of the data volume
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
 
-	// StorageClassName is a shorthand for specifying the storage class (used with Size)
+	// StorageClassName for the data PVC
 	// +optional
 	StorageClassName *string `json:"storageClassName,omitempty"`
 
@@ -377,11 +356,6 @@ type DataStorageConfig struct {
 	// For advanced multi-disk configurations
 	// +optional
 	Paths []DataPath `json:"paths,omitempty"`
-
-	// Volume uses a single PVC for data storage with full customization
-	// Overrides Size/StorageClassName if specified
-	// +optional
-	Volume *VolumeConfig `json:"volume,omitempty"`
 }
 
 // DataPath specifies a data directory with capacity

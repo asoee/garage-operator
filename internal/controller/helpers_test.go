@@ -337,6 +337,7 @@ func TestBuildContainerPorts(t *testing.T) {
 
 func TestBuildVolumeClaimTemplates(t *testing.T) {
 	storageClass := "fast-ssd"
+	dataSize := resource.MustParse("10Gi")
 
 	tests := []struct {
 		name                     string
@@ -351,8 +352,8 @@ func TestBuildVolumeClaimTemplates(t *testing.T) {
 			cluster: &garagev1alpha1.GarageCluster{
 				Spec: garagev1alpha1.GarageClusterSpec{
 					Storage: garagev1alpha1.StorageConfig{
-						MetadataStorage: &garagev1alpha1.VolumeConfig{},
-						DataStorage:     &garagev1alpha1.DataStorageConfig{},
+						Metadata: &garagev1alpha1.VolumeConfig{},
+						Data:     &garagev1alpha1.DataStorageConfig{},
 					},
 				},
 			},
@@ -360,18 +361,16 @@ func TestBuildVolumeClaimTemplates(t *testing.T) {
 			wantDataSize:     "100Gi",
 		},
 		{
-			name: "PVC config with volume config",
+			name: "PVC config with size and storage class",
 			cluster: &garagev1alpha1.GarageCluster{
 				Spec: garagev1alpha1.GarageClusterSpec{
 					Storage: garagev1alpha1.StorageConfig{
-						MetadataStorage: &garagev1alpha1.VolumeConfig{
+						Metadata: &garagev1alpha1.VolumeConfig{
 							Size: resource.MustParse("1Gi"),
 						},
-						DataStorage: &garagev1alpha1.DataStorageConfig{
-							Volume: &garagev1alpha1.VolumeConfig{
-								Size:             resource.MustParse("10Gi"),
-								StorageClassName: &storageClass,
-							},
+						Data: &garagev1alpha1.DataStorageConfig{
+							Size:             &dataSize,
+							StorageClassName: &storageClass,
 						},
 					},
 				},

@@ -18,6 +18,8 @@ package v1alpha1
 
 import (
 	"testing"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func TestValidateBindAddress(t *testing.T) {
@@ -157,16 +159,17 @@ func TestGarageCluster_ValidateZoneRedundancy(t *testing.T) {
 }
 
 func TestGarageCluster_ValidateStorage(t *testing.T) {
+	size := resource.MustParse("100Gi")
 	tests := []struct {
 		name    string
 		storage StorageConfig
 		wantErr bool
 	}{
 		{
-			name: "valid volume config",
+			name: "valid size config",
 			storage: StorageConfig{
-				DataStorage: &DataStorageConfig{
-					Volume: &VolumeConfig{},
+				Data: &DataStorageConfig{
+					Size: &size,
 				},
 			},
 			wantErr: false,
@@ -174,17 +177,22 @@ func TestGarageCluster_ValidateStorage(t *testing.T) {
 		{
 			name: "invalid - paths not supported",
 			storage: StorageConfig{
-				DataStorage: &DataStorageConfig{
+				Data: &DataStorageConfig{
 					Paths: []DataPath{{Path: "/data"}},
 				},
 			},
 			wantErr: true,
 		},
 		{
-			name: "invalid - no volume specified",
+			name: "invalid - no size specified",
 			storage: StorageConfig{
-				DataStorage: &DataStorageConfig{},
+				Data: &DataStorageConfig{},
 			},
+			wantErr: true,
+		},
+		{
+			name:    "invalid - no data config",
+			storage: StorageConfig{},
 			wantErr: true,
 		},
 	}

@@ -40,7 +40,8 @@ spec:
   replication:
     factor: 3
   storage:
-    dataSize: 100Gi
+    data:
+      size: 100Gi
   network:
     rpcBindPort: 3901
     service:

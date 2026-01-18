@@ -316,8 +316,10 @@ spec:
     factor: 2
     consistencyMode: consistent
   storage:
-    dataSize: 1Gi
-    metadataSize: 100Mi
+    data:
+      size: 1Gi
+    metadata:
+      size: 100Mi
   network:
     rpcBindPort: 3901
     rpcSecretRef:

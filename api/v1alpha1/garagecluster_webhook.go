@@ -198,15 +198,19 @@ func (r *GarageCluster) validateZoneRedundancy() error {
 
 // validateStorage validates storage configuration.
 func (r *GarageCluster) validateStorage() error {
-	// Paths-based storage is not yet implemented in the controller.
-	// Only PVC-based storage (volume) is supported.
-	if len(r.Spec.Storage.DataStorage.Paths) > 0 {
-		return fmt.Errorf("storage.data.paths: path-based storage is not implemented; use storage.data.volume with a PVC instead")
+	if r.Spec.Storage.Data == nil {
+		return fmt.Errorf("storage.data: must specify data storage configuration")
 	}
 
-	// Volume is required
-	if r.Spec.Storage.DataStorage.Volume == nil {
-		return fmt.Errorf("storage.data.volume: must specify volume configuration for data storage")
+	// Paths-based storage is not yet implemented in the controller.
+	// Only PVC-based storage (size) is supported.
+	if len(r.Spec.Storage.Data.Paths) > 0 {
+		return fmt.Errorf("storage.data.paths: path-based storage is not implemented; use storage.data.size instead")
+	}
+
+	// Size is required
+	if r.Spec.Storage.Data.Size == nil {
+		return fmt.Errorf("storage.data.size: must specify size for data storage")
 	}
 
 	return nil

@@ -926,12 +926,8 @@ func buildVolumesAndMounts(cluster *garagev1alpha1.GarageCluster) ([]corev1.Volu
 func buildVolumeClaimTemplates(cluster *garagev1alpha1.GarageCluster) []corev1.PersistentVolumeClaim {
 	// Metadata PVC - smaller, benefits from fast storage (SSD)
 	metadataStorageSize := resource.MustParse("10Gi")
-	if cluster.Spec.Storage.MetadataSize != nil && !cluster.Spec.Storage.MetadataSize.IsZero() {
-		metadataStorageSize = *cluster.Spec.Storage.MetadataSize
-	}
-	if cluster.Spec.Storage.MetadataStorage != nil &&
-		!cluster.Spec.Storage.MetadataStorage.Size.IsZero() {
-		metadataStorageSize = cluster.Spec.Storage.MetadataStorage.Size
+	if cluster.Spec.Storage.Metadata != nil && !cluster.Spec.Storage.Metadata.Size.IsZero() {
+		metadataStorageSize = cluster.Spec.Storage.Metadata.Size
 	}
 
 	metadataPVC := corev1.PersistentVolumeClaim{
@@ -947,27 +943,14 @@ func buildVolumeClaimTemplates(cluster *garagev1alpha1.GarageCluster) []corev1.P
 	}
 
 	// Set metadata storage class
-	if cluster.Spec.Storage.MetadataStorageClassName != nil {
-		metadataPVC.Spec.StorageClassName = cluster.Spec.Storage.MetadataStorageClassName
-	} else if cluster.Spec.Storage.MetadataStorage != nil &&
-		cluster.Spec.Storage.MetadataStorage.StorageClassName != nil {
-		metadataPVC.Spec.StorageClassName = cluster.Spec.Storage.MetadataStorage.StorageClassName
+	if cluster.Spec.Storage.Metadata != nil && cluster.Spec.Storage.Metadata.StorageClassName != nil {
+		metadataPVC.Spec.StorageClassName = cluster.Spec.Storage.Metadata.StorageClassName
 	}
 
 	// Data PVC - larger, can use cheaper storage (HDD)
-	// Priority: data.volume.size > data.size > dataSize > default
 	dataStorageSize := resource.MustParse("100Gi")
-	if cluster.Spec.Storage.DataSize != nil && !cluster.Spec.Storage.DataSize.IsZero() {
-		dataStorageSize = *cluster.Spec.Storage.DataSize
-	}
-	if cluster.Spec.Storage.DataStorage != nil {
-		if cluster.Spec.Storage.DataStorage.Size != nil && !cluster.Spec.Storage.DataStorage.Size.IsZero() {
-			dataStorageSize = *cluster.Spec.Storage.DataStorage.Size
-		}
-		if cluster.Spec.Storage.DataStorage.Volume != nil &&
-			!cluster.Spec.Storage.DataStorage.Volume.Size.IsZero() {
-			dataStorageSize = cluster.Spec.Storage.DataStorage.Volume.Size
-		}
+	if cluster.Spec.Storage.Data != nil && cluster.Spec.Storage.Data.Size != nil && !cluster.Spec.Storage.Data.Size.IsZero() {
+		dataStorageSize = *cluster.Spec.Storage.Data.Size
 	}
 
 	dataPVC := corev1.PersistentVolumeClaim{
@@ -983,18 +966,8 @@ func buildVolumeClaimTemplates(cluster *garagev1alpha1.GarageCluster) []corev1.P
 	}
 
 	// Set data storage class
-	// Priority: data.volume.storageClassName > data.storageClassName > dataStorageClassName
-	if cluster.Spec.Storage.DataStorageClassName != nil {
-		dataPVC.Spec.StorageClassName = cluster.Spec.Storage.DataStorageClassName
-	}
-	if cluster.Spec.Storage.DataStorage != nil {
-		if cluster.Spec.Storage.DataStorage.StorageClassName != nil {
-			dataPVC.Spec.StorageClassName = cluster.Spec.Storage.DataStorage.StorageClassName
-		}
-		if cluster.Spec.Storage.DataStorage.Volume != nil &&
-			cluster.Spec.Storage.DataStorage.Volume.StorageClassName != nil {
-			dataPVC.Spec.StorageClassName = cluster.Spec.Storage.DataStorage.Volume.StorageClassName
-		}
+	if cluster.Spec.Storage.Data != nil && cluster.Spec.Storage.Data.StorageClassName != nil {
+		dataPVC.Spec.StorageClassName = cluster.Spec.Storage.Data.StorageClassName
 	}
 
 	return []corev1.PersistentVolumeClaim{metadataPVC, dataPVC}
@@ -1849,21 +1822,14 @@ func (r *GarageClusterReconciler) calculateNodeCapacity(cluster *garagev1alpha1.
 	// Default to 10GB if no storage config
 	const defaultCapacity uint64 = 10 * 1024 * 1024 * 1024
 
-	if cluster.Spec.Storage.DataSize != nil {
-		return uint64(cluster.Spec.Storage.DataSize.Value())
-	}
-
-	if cluster.Spec.Storage.DataStorage != nil {
-		if cluster.Spec.Storage.DataStorage.Size != nil {
-			return uint64(cluster.Spec.Storage.DataStorage.Size.Value())
-		}
-		if cluster.Spec.Storage.DataStorage.Volume != nil && !cluster.Spec.Storage.DataStorage.Volume.Size.IsZero() {
-			return uint64(cluster.Spec.Storage.DataStorage.Volume.Size.Value())
+	if cluster.Spec.Storage.Data != nil {
+		if cluster.Spec.Storage.Data.Size != nil {
+			return uint64(cluster.Spec.Storage.Data.Size.Value())
 		}
 		// Sum capacity from data paths if using multiple paths
-		if len(cluster.Spec.Storage.DataStorage.Paths) > 0 {
+		if len(cluster.Spec.Storage.Data.Paths) > 0 {
 			var total uint64
-			for _, path := range cluster.Spec.Storage.DataStorage.Paths {
+			for _, path := range cluster.Spec.Storage.Data.Paths {
 				if path.Capacity != nil {
 					total += uint64(path.Capacity.Value())
 				} else if path.Volume != nil && !path.Volume.Size.IsZero() {
