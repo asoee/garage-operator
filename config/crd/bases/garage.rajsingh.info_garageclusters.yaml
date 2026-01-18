@@ -2987,6 +2987,32 @@ spec:
                     description: MetadataSnapshotsDir specifies directory for metadata
                       snapshots
                     type: string
+                  pvcRetentionPolicy:
+                    description: |-
+                      PVCRetentionPolicy controls whether PVCs are deleted when the StatefulSet is deleted or scaled down.
+                      Requires Kubernetes 1.23+. If not specified, defaults to Retain for both policies.
+                    properties:
+                      whenDeleted:
+                        default: Retain
+                        description: |-
+                          WhenDeleted specifies what happens to PVCs when the StatefulSet is deleted.
+                          - "Retain" (default): PVCs are kept for manual cleanup or data recovery
+                          - "Delete": PVCs are automatically deleted with the StatefulSet
+                        enum:
+                        - Retain
+                        - Delete
+                        type: string
+                      whenScaled:
+                        default: Retain
+                        description: |-
+                          WhenScaled specifies what happens to PVCs when the StatefulSet is scaled down.
+                          - "Retain" (default): PVCs are kept when scaling down (allows scale back up)
+                          - "Delete": PVCs for removed replicas are deleted
+                        enum:
+                        - Retain
+                        - Delete
+                        type: string
+                    type: object
                 type: object
               tolerations:
                 description: Tolerations for pod scheduling

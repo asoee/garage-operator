@@ -313,6 +313,31 @@ type StorageConfig struct {
 	// DataFsync enables fsync for data block writes
 	// +optional
 	DataFsync bool `json:"dataFsync,omitempty"`
+
+	// PVCRetentionPolicy controls whether PVCs are deleted when the StatefulSet is deleted or scaled down.
+	// Requires Kubernetes 1.23+. If not specified, defaults to Retain for both policies.
+	// +optional
+	PVCRetentionPolicy *PVCRetentionPolicy `json:"pvcRetentionPolicy,omitempty"`
+}
+
+// PVCRetentionPolicy controls PVC lifecycle for StatefulSet volumes.
+// This maps to StatefulSet's persistentVolumeClaimRetentionPolicy field.
+type PVCRetentionPolicy struct {
+	// WhenDeleted specifies what happens to PVCs when the StatefulSet is deleted.
+	// - "Retain" (default): PVCs are kept for manual cleanup or data recovery
+	// - "Delete": PVCs are automatically deleted with the StatefulSet
+	// +kubebuilder:validation:Enum=Retain;Delete
+	// +kubebuilder:default="Retain"
+	// +optional
+	WhenDeleted string `json:"whenDeleted,omitempty"`
+
+	// WhenScaled specifies what happens to PVCs when the StatefulSet is scaled down.
+	// - "Retain" (default): PVCs are kept when scaling down (allows scale back up)
+	// - "Delete": PVCs for removed replicas are deleted
+	// +kubebuilder:validation:Enum=Retain;Delete
+	// +kubebuilder:default="Retain"
+	// +optional
+	WhenScaled string `json:"whenScaled,omitempty"`
 }
 
 // VolumeConfig configures a persistent volume

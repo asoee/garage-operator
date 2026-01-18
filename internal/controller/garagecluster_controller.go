@@ -973,6 +973,28 @@ func buildVolumeClaimTemplates(cluster *garagev1alpha1.GarageCluster) []corev1.P
 	return []corev1.PersistentVolumeClaim{metadataPVC, dataPVC}
 }
 
+// buildPVCRetentionPolicy returns the PVC retention policy for the StatefulSet.
+// This controls whether PVCs are deleted when the StatefulSet is deleted or scaled down.
+// Defaults to Retain for both policies (preserving existing behavior).
+func buildPVCRetentionPolicy(cluster *garagev1alpha1.GarageCluster) *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy {
+	whenDeleted := appsv1.RetainPersistentVolumeClaimRetentionPolicyType
+	whenScaled := appsv1.RetainPersistentVolumeClaimRetentionPolicyType
+
+	if cluster.Spec.Storage.PVCRetentionPolicy != nil {
+		if cluster.Spec.Storage.PVCRetentionPolicy.WhenDeleted == "Delete" {
+			whenDeleted = appsv1.DeletePersistentVolumeClaimRetentionPolicyType
+		}
+		if cluster.Spec.Storage.PVCRetentionPolicy.WhenScaled == "Delete" {
+			whenScaled = appsv1.DeletePersistentVolumeClaimRetentionPolicyType
+		}
+	}
+
+	return &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: whenDeleted,
+		WhenScaled:  whenScaled,
+	}
+}
+
 // reconcileStatefulSet creates/updates the StatefulSet for Garage pods.
 // The configHash parameter is used to trigger rolling restarts when config changes,
 // since Garage does NOT support hot-reload (config is only read at startup).
@@ -1084,9 +1106,10 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels, Annotations: podAnnotations},
 				Spec:       podSpec,
 			},
-			VolumeClaimTemplates: volumeClaimTemplates,
-			PodManagementPolicy:  appsv1.ParallelPodManagement,
-			UpdateStrategy:       appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType},
+			VolumeClaimTemplates:                 volumeClaimTemplates,
+			PodManagementPolicy:                  appsv1.ParallelPodManagement,
+			UpdateStrategy:                       appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType},
+			PersistentVolumeClaimRetentionPolicy: buildPVCRetentionPolicy(cluster),
 		},
 	}
 
