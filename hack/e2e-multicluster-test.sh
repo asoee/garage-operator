@@ -11,7 +11,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Cluster names
 CLUSTER1_NAME="garage-multi-e2e-1"
 CLUSTER2_NAME="garage-multi-e2e-2"
-NAMESPACE="garage-system"
+NAMESPACE="garage-operator-system"
 DOCKER_NETWORK="garage-multi-e2e-net"
 TIMEOUT=180
 

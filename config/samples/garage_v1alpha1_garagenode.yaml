@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: garage-operator
     app.kubernetes.io/managed-by: kustomize
   name: garage-node-0
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -24,7 +24,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageNode
 metadata:
   name: garage-node-1
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -37,7 +37,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageNode
 metadata:
   name: garage-node-2
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -51,7 +51,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageNode
 metadata:
   name: garage-gateway
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -66,7 +66,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageNode
 metadata:
   name: external-dc2-node
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage

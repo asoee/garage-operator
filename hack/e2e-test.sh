@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLUSTER_NAME="garage-e2e-test"
-NAMESPACE="garage-system"
+NAMESPACE="garage-operator-system"
 TIMEOUT=120
 
 # Colors for output

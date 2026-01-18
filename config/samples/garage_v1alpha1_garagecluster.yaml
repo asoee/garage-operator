@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: garage-operator
     app.kubernetes.io/managed-by: kustomize
   name: garage
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   replicas: 3
   image: dxflrs/garage:v2.1.0
@@ -52,7 +52,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageCluster
 metadata:
   name: garage
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   replicas: 3
   image: dxflrs/garage:v2.1.0
@@ -128,7 +128,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageCluster
 metadata:
   name: garage-manual
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   replicas: 3
   zone: dc1
@@ -180,7 +180,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: garage-rpc-secret
-  namespace: garage-system
+  namespace: garage-operator-system
 type: Opaque
 stringData:
   # Generate with: openssl rand -hex 32

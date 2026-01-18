@@ -86,8 +86,8 @@ jobs:
           if kind get clusters 2>/dev/null | grep -q "garage"; then
             kubectl get all -A > /tmp/e2e-debug/all-resources.txt 2>&1 || true
             kubectl get garagecluster,garagebucket,garagekey -A -o yaml > /tmp/e2e-debug/garage-resources.yaml 2>&1 || true
-            kubectl logs deployment/garage-operator -n garage-system --tail=200 > /tmp/e2e-debug/operator-logs.txt 2>&1 || true
-            kubectl describe pods -n garage-system > /tmp/e2e-debug/pod-describe.txt 2>&1 || true
+            kubectl logs deployment/garage-operator -n garage-operator-system --tail=200 > /tmp/e2e-debug/operator-logs.txt 2>&1 || true
+            kubectl describe pods -n garage-operator-system > /tmp/e2e-debug/pod-describe.txt 2>&1 || true
           fi
           cp /tmp/e2e-output.log /tmp/e2e-debug/ 2>/dev/null || true
 
@@ -162,7 +162,7 @@ jobs:
           if kind get clusters 2>/dev/null | grep -q "garage"; then
             kubectl get all -A > /tmp/e2e-debug/all-resources.txt 2>&1 || true
             kubectl get garagecluster,garagebucket,garagekey -A -o yaml > /tmp/e2e-debug/garage-resources.yaml 2>&1 || true
-            kubectl logs deployment/garage-operator -n garage-system --tail=200 > /tmp/e2e-debug/operator-logs.txt 2>&1 || true
+            kubectl logs deployment/garage-operator -n garage-operator-system --tail=200 > /tmp/e2e-debug/operator-logs.txt 2>&1 || true
           fi
           cp /tmp/e2e-output.log /tmp/e2e-debug/ 2>/dev/null || true
 
@@ -247,7 +247,7 @@ jobs:
             if kind get clusters 2>/dev/null | grep -q "$cluster"; then
               kubectl --context "kind-$cluster" get all -A > "/tmp/e2e-debug/${cluster}-resources.txt" 2>&1 || true
               kubectl --context "kind-$cluster" get garagecluster,garagebucket,garagekey -A -o yaml > "/tmp/e2e-debug/${cluster}-garage.yaml" 2>&1 || true
-              kubectl --context "kind-$cluster" logs deployment/garage-operator -n garage-system --tail=200 > "/tmp/e2e-debug/${cluster}-operator.txt" 2>&1 || true
+              kubectl --context "kind-$cluster" logs deployment/garage-operator -n garage-operator-system --tail=200 > "/tmp/e2e-debug/${cluster}-operator.txt" 2>&1 || true
             fi
           done
           cp /tmp/e2e-multicluster-output.log /tmp/e2e-debug/ 2>/dev/null || true

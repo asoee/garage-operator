@@ -80,7 +80,7 @@ install_crds() {
 
 create_test_namespace() {
     log_info "Creating test namespace..."
-    kubectl create namespace garage-system --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create namespace garage-operator-system --dry-run=client -o yaml | kubectl apply -f -
 }
 
 deploy_operator() {
@@ -107,7 +107,7 @@ create_admin_secret() {
 
     kubectl create secret generic garage-admin-token \
         --from-literal=admin-token="${ADMIN_TOKEN}" \
-        -n garage-system \
+        -n garage-operator-system \
         --dry-run=client -o yaml | kubectl apply -f -
 
     echo ""

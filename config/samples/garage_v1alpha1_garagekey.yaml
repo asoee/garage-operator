@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: garage-operator
     app.kubernetes.io/managed-by: kustomize
   name: app-key
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -35,7 +35,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageKey
 metadata:
   name: admin-key
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -55,7 +55,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageKey
 metadata:
   name: imported-key
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -66,7 +66,7 @@ spec:
   importKey:
     secretRef:
       name: existing-credentials
-      namespace: garage-system
+      namespace: garage-operator-system
 
   bucketPermissions:
     - globalAlias: shared-bucket

@@ -76,7 +76,7 @@ dev-logs: ## Stream operator logs
 dev-test: ## Apply test resources to development cluster
 	@kubectl apply -f hack/test-resources.yaml
 	@echo "Test resources applied. Check status with:"
-	@echo "  kubectl get garageclusters,garagebuckets,garagekeys -n garage-system"
+	@echo "  kubectl get garageclusters,garagebuckets,garagekeys -n garage-operator-system"
 
 .PHONY: dev-status
 dev-status: ## Show status of all garage resources
@@ -90,7 +90,7 @@ dev-status: ## Show status of all garage resources
 	@echo ""
 	@echo "=== GarageAdminTokens ===" && kubectl get garageadmintokens -A 2>/dev/null || echo "None found"
 	@echo ""
-	@echo "=== Pods ===" && kubectl get pods -n garage-system 2>/dev/null || echo "None found"
+	@echo "=== Pods ===" && kubectl get pods -n garage-operator-system 2>/dev/null || echo "None found"
 
 .PHONY: dev-clean
 dev-clean: ## Delete test resources from development cluster

@@ -4,7 +4,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageAdminToken
 metadata:
   name: admin-full
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -20,7 +20,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageAdminToken
 metadata:
   name: admin-readonly
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -36,7 +36,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageAdminToken
 metadata:
   name: admin-bucket-manager
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -63,7 +63,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageAdminToken
 metadata:
   name: admin-team-buckets
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage

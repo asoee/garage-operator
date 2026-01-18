@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: garage-operator
     app.kubernetes.io/managed-by: kustomize
   name: my-bucket
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -54,7 +54,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageBucket
 metadata:
   name: website-bucket
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage

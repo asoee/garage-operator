@@ -6,7 +6,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageAdminToken
 metadata:
   name: garage-admin
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -18,7 +18,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageCluster
 metadata:
   name: garage
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   replicas: 3
 
@@ -59,7 +59,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageBucket
 metadata:
   name: test-bucket
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
@@ -73,7 +73,7 @@ apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageKey
 metadata:
   name: test-key
-  namespace: garage-system
+  namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
