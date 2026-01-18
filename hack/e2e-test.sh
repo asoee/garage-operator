@@ -201,6 +201,16 @@ test_cluster_creation() {
 test_cluster_health() {
     log_test "Testing cluster health..."
 
+    # Wait for health to be populated (controller needs time after pods are ready)
+    if ! wait_for_cluster_health "healthy" 60; then
+        local health=$(get_cluster_health)
+        local connected=$(get_connected_nodes)
+        local partitions_quorum=$(kubectl get garagecluster garage -n "$NAMESPACE" -o jsonpath='{.status.health.partitionsQuorum}' 2>/dev/null || echo "0")
+        local partitions_total=$(kubectl get garagecluster garage -n "$NAMESPACE" -o jsonpath='{.status.health.partitions}' 2>/dev/null || echo "0")
+        test_fail "Cluster health check failed: health=$health, nodes=$connected, partitions=$partitions_quorum/$partitions_total"
+        return 1
+    fi
+
     local health=$(get_cluster_health)
     local connected=$(get_connected_nodes)
     local partitions_quorum=$(kubectl get garagecluster garage -n "$NAMESPACE" -o jsonpath='{.status.health.partitionsQuorum}' 2>/dev/null || echo "0")
@@ -557,6 +567,12 @@ test_status_endpoints() {
 test_bucket_quota_update() {
     log_test "Testing bucket quota update..."
 
+    # First ensure bucket is Ready (may need reconciliation after pause-reconcile test)
+    if ! check_resource_phase "garagebucket" "quota-test-bucket" "Ready" 30; then
+        test_fail "Bucket quota update failed (bucket not Ready before update)"
+        return 1
+    fi
+
     # Update quotas on existing bucket
     kubectl patch garagebucket quota-test-bucket -n "$NAMESPACE" --type=merge \
         -p '{"spec":{"quotas":{"maxSize":"1Gi","maxObjects":2000}}}'
@@ -574,6 +590,12 @@ test_bucket_quota_update() {
 
 test_key_permission_update() {
     log_test "Testing key permission update..."
+
+    # First ensure key is Ready (may need reconciliation after pause-reconcile test)
+    if ! check_resource_phase "garagekey" "multi-bucket-key" "Ready" 30; then
+        test_fail "Key permission update failed (key not Ready before update)"
+        return 1
+    fi
 
     # Update permissions on existing key
     kubectl patch garagekey multi-bucket-key -n "$NAMESPACE" --type=merge \
@@ -1424,18 +1446,21 @@ test_pdb_creation() {
     kubectl patch garagecluster garage -n "$NAMESPACE" --type=merge \
         -p '{"spec":{"podDisruptionBudget":{"enabled":true,"minAvailable":"2"}}}'
 
-    sleep 10
-
-    # Check if PDB was created
-    if kubectl get pdb garage -n "$NAMESPACE" &>/dev/null; then
-        local min_available=$(kubectl get pdb garage -n "$NAMESPACE" -o jsonpath='{.spec.minAvailable}' 2>/dev/null)
-        if [ "$min_available" = "2" ]; then
-            test_pass "PDB created with minAvailable: $min_available"
+    # Wait for PDB to be created (controller needs time to reconcile)
+    local timeout=30
+    local end_time=$((SECONDS + timeout))
+    while [ $SECONDS -lt $end_time ]; do
+        if kubectl get pdb garage -n "$NAMESPACE" &>/dev/null; then
+            local min_available=$(kubectl get pdb garage -n "$NAMESPACE" -o jsonpath='{.spec.minAvailable}' 2>/dev/null)
+            if [ "$min_available" = "2" ]; then
+                test_pass "PDB created with minAvailable: $min_available"
+                return 0
+            fi
+            test_pass "PDB created (minAvailable: $min_available)"
             return 0
         fi
-        test_pass "PDB created (minAvailable: $min_available)"
-        return 0
-    fi
+        sleep 2
+    done
 
     # PDB may not be implemented yet - check if it's a known limitation
     test_fail "PDB not created (may not be implemented)"
@@ -1815,6 +1840,11 @@ test_pause_reconcile_annotation() {
     # Remove pause
     kubectl annotate garagecluster garage -n "$NAMESPACE" "garage.rajsingh.info/pause-reconcile-" 2>/dev/null || true
     kubectl label garagecluster garage -n "$NAMESPACE" test-label- 2>/dev/null || true
+
+    # Wait for resources to be reconciled after unpausing
+    # This is important for subsequent tests that depend on Ready state
+    sleep 5
+    wait_for_cluster_health "healthy" 30 || true
 
     # If generation didn't change, reconciliation was paused
     # Note: This test is informational - pause may or may not be implemented
