@@ -184,12 +184,12 @@ func (r *GarageNodeReconciler) reconcileNode(ctx context.Context, node *garagev1
 		if node.Spec.Capacity == nil {
 			return fmt.Errorf("capacity is required for non-gateway nodes")
 		}
-		cap := uint64(node.Spec.Capacity.Value())
+		nodeCapacity := uint64(node.Spec.Capacity.Value())
 		// Garage requires minimum capacity of 1024 bytes (1 KB)
-		if cap < 1024 {
-			return fmt.Errorf("capacity must be at least 1024 bytes (1 KB), got %d", cap)
+		if nodeCapacity < 1024 {
+			return fmt.Errorf("capacity must be at least 1024 bytes (1 KB), got %d", nodeCapacity)
 		}
-		capacity = &cap
+		capacity = &nodeCapacity
 	}
 
 	// Check if update is needed

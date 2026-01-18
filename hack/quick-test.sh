@@ -45,89 +45,18 @@ kind load docker-image garage-operator:dev --name "$CLUSTER_NAME"
 # Restart operator deployment to pick up new image
 log_info "Restarting operator..."
 kubectl rollout restart deployment/garage-operator -n "$NAMESPACE" 2>/dev/null || {
-    log_warn "Operator deployment not found, deploying fresh..."
+    log_warn "Operator deployment not found, deploying fresh via Helm..."
 
-    # Ensure CRDs are installed
-    kubectl apply -f config/crd/bases/
-
-    # Create namespace if needed
-    kubectl create namespace "$NAMESPACE" 2>/dev/null || true
+    # Deploy operator using Helm chart (includes CRDs)
+    helm upgrade --install garage-operator charts/garage-operator \
+        --namespace "$NAMESPACE" \
+        --create-namespace \
+        -f charts/garage-operator/values-dev.yaml \
+        --wait --timeout 120s
 
     # Create admin token secret if needed
     kubectl get secret garage-admin-token -n "$NAMESPACE" 2>/dev/null || \
         kubectl create secret generic garage-admin-token -n "$NAMESPACE" --from-literal=admin-token="quick-test-token"
-
-    # Deploy operator
-    cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: garage-operator
-  namespace: $NAMESPACE
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: garage-operator-role
-rules:
-- apiGroups: ["garage.rajsingh.info"]
-  resources: ["*"]
-  verbs: ["*"]
-- apiGroups: ["apps"]
-  resources: ["statefulsets"]
-  verbs: ["*"]
-- apiGroups: [""]
-  resources: ["services", "configmaps", "secrets", "pods", "persistentvolumeclaims"]
-  verbs: ["*"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: garage-operator-rolebinding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: garage-operator-role
-subjects:
-- kind: ServiceAccount
-  name: garage-operator
-  namespace: $NAMESPACE
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: garage-operator
-  namespace: $NAMESPACE
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: garage-operator
-  template:
-    metadata:
-      labels:
-        app: garage-operator
-    spec:
-      serviceAccountName: garage-operator
-      containers:
-      - name: manager
-        image: garage-operator:dev
-        imagePullPolicy: Never
-        command: ["/manager"]
-        args: ["--health-probe-bind-address=:8081"]
-        ports:
-        - containerPort: 8081
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8081
-          initialDelaySeconds: 15
-        readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 8081
-          initialDelaySeconds: 5
-EOF
 }
 
 # Wait for rollout

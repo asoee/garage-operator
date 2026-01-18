@@ -24,10 +24,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -131,6 +133,11 @@ func (r *GarageClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return r.updateStatus(ctx, cluster, "Error", err)
 	}
 
+	// Create or update PodDisruptionBudget if enabled
+	if err := r.reconcilePDB(ctx, cluster); err != nil {
+		return r.updateStatus(ctx, cluster, "Error", err)
+	}
+
 	// Bootstrap cluster nodes if pods are running but cluster isn't formed
 	if err := r.bootstrapCluster(ctx, cluster); err != nil {
 		log.Error(err, "Failed to bootstrap cluster (will retry)")
@@ -198,6 +205,17 @@ func (r *GarageClusterReconciler) finalize(ctx context.Context, cluster *garagev
 		log.Info("Deleting ConfigMap", "name", cm.Name)
 		if err := r.Delete(ctx, cm); err != nil && !errors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete ConfigMap: %w", err)
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	// Delete PodDisruptionBudget
+	pdb := &policyv1.PodDisruptionBudget{}
+	if err := r.Get(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}, pdb); err == nil {
+		log.Info("Deleting PDB", "name", pdb.Name)
+		if err := r.Delete(ctx, pdb); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete PDB: %w", err)
 		}
 	} else if !errors.IsNotFound(err) {
 		return err
@@ -319,6 +337,7 @@ func (r *GarageClusterReconciler) generateGarageConfig(cluster *garagev1alpha1.G
 	writeStorageConfig(&config, cluster)
 	writeBlockConfig(&config, cluster)
 	writeSecurityConfig(&config, cluster)
+	writeWorkersConfig(&config, cluster)
 	writeRPCConfig(&config, cluster)
 	writeS3APIConfig(&config, cluster)
 	writeK2VAPIConfig(&config, cluster)
@@ -407,6 +426,21 @@ func writeSecurityConfig(config *strings.Builder, cluster *garagev1alpha1.Garage
 	}
 	if cluster.Spec.Security.AllowPunycode {
 		config.WriteString("allow_punycode = true\n")
+	}
+}
+
+func writeWorkersConfig(config *strings.Builder, cluster *garagev1alpha1.GarageCluster) {
+	if cluster.Spec.Workers == nil {
+		return
+	}
+	if cluster.Spec.Workers.ScrubTranquility != nil {
+		fmt.Fprintf(config, "scrub_tranquility = %d\n", *cluster.Spec.Workers.ScrubTranquility)
+	}
+	if cluster.Spec.Workers.ResyncTranquility != nil {
+		fmt.Fprintf(config, "resync_tranquility = %d\n", *cluster.Spec.Workers.ResyncTranquility)
+	}
+	if cluster.Spec.Workers.ResyncWorkerCount != nil {
+		fmt.Fprintf(config, "resync_worker_count = %d\n", *cluster.Spec.Workers.ResyncWorkerCount)
 	}
 }
 
@@ -1127,6 +1161,80 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 	return r.Update(ctx, existing)
 }
 
+func (r *GarageClusterReconciler) reconcilePDB(ctx context.Context, cluster *garagev1alpha1.GarageCluster) error {
+	log := logf.FromContext(ctx)
+
+	// Check if PDB is enabled
+	if cluster.Spec.PodDisruptionBudget == nil || !cluster.Spec.PodDisruptionBudget.Enabled {
+		// PDB not enabled, delete if exists
+		pdb := &policyv1.PodDisruptionBudget{}
+		if err := r.Get(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}, pdb); err == nil {
+			log.Info("Deleting PDB (disabled)", "name", cluster.Name)
+			return r.Delete(ctx, pdb)
+		}
+		return nil
+	}
+
+	pdb := &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cluster.Name,
+			Namespace: cluster.Namespace,
+			Labels:    r.labelsForCluster(cluster),
+		},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: r.selectorLabelsForCluster(cluster),
+			},
+		},
+	}
+
+	// Set MinAvailable or MaxUnavailable
+	if cluster.Spec.PodDisruptionBudget.MinAvailable != nil {
+		val := intstr.Parse(*cluster.Spec.PodDisruptionBudget.MinAvailable)
+		pdb.Spec.MinAvailable = &val
+	} else if cluster.Spec.PodDisruptionBudget.MaxUnavailable != nil {
+		val := intstr.Parse(*cluster.Spec.PodDisruptionBudget.MaxUnavailable)
+		pdb.Spec.MaxUnavailable = &val
+	} else {
+		// Default: require at least (replicas - 1) to maintain quorum
+		replicas := int32(3)
+		if cluster.Spec.Replicas > 0 {
+			replicas = cluster.Spec.Replicas
+		}
+		minAvail := replicas - 1
+		if minAvail < 1 {
+			minAvail = 1
+		}
+		pdb.Spec.MinAvailable = &intstr.IntOrString{Type: intstr.Int, IntVal: minAvail}
+	}
+
+	// Set controller reference
+	if err := controllerutil.SetControllerReference(cluster, pdb, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	// Check if PDB exists
+	existing := &policyv1.PodDisruptionBudget{}
+	err := r.Get(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}, existing)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("Creating PDB", "name", cluster.Name)
+			return r.Create(ctx, pdb)
+		}
+		return err
+	}
+
+	// Update if spec differs
+	if !reflect.DeepEqual(existing.Spec.MinAvailable, pdb.Spec.MinAvailable) ||
+		!reflect.DeepEqual(existing.Spec.MaxUnavailable, pdb.Spec.MaxUnavailable) {
+		existing.Spec = pdb.Spec
+		log.Info("Updating PDB", "name", cluster.Name)
+		return r.Update(ctx, existing)
+	}
+
+	return nil
+}
+
 func (r *GarageClusterReconciler) updateStatus(ctx context.Context, cluster *garagev1alpha1.GarageCluster, phase string, err error) (ctrl.Result, error) {
 	cluster.Status.Phase = phase
 	// Only set ObservedGeneration when reconciliation succeeded
@@ -1236,6 +1344,32 @@ func (r *GarageClusterReconciler) updateStatusFromCluster(ctx context.Context, c
 						}
 					}
 					cluster.Status.ClusterID = smallestID
+				}
+
+				// Populate BuildInfo from the first connected node
+				for _, node := range status.Nodes {
+					if node.IsUp && node.GarageVersion != nil {
+						cluster.Status.BuildInfo = &garagev1alpha1.GarageBuildInfo{
+							Version: *node.GarageVersion,
+						}
+						break
+					}
+				}
+
+				// Calculate storage stats from all nodes
+				var totalData, availableData uint64
+				for _, node := range status.Nodes {
+					if node.DataPartition != nil {
+						totalData += node.DataPartition.Total
+						availableData += node.DataPartition.Available
+					}
+				}
+				if totalData > 0 {
+					cluster.Status.StorageStats = &garagev1alpha1.ClusterStorageStats{
+						TotalCapacity:     *resource.NewQuantity(int64(totalData), resource.BinarySI),
+						UsedCapacity:      *resource.NewQuantity(int64(totalData-availableData), resource.BinarySI),
+						AvailableCapacity: *resource.NewQuantity(int64(availableData), resource.BinarySI),
+					}
 				}
 			}
 			cluster.Status.LayoutVersion = status.LayoutVersion
