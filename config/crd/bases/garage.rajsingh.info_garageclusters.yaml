@@ -1887,6 +1887,16 @@ spec:
                       required:
                       - adminApiEndpoint
                       type: object
+                    defaultCapacity:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      description: |-
+                        DefaultCapacity is the default storage capacity to assign to remote nodes
+                        that don't yet have a role in the layout. If not specified, defaults to 100Gi.
+                        Set to "0" to add nodes as gateway-only (no storage).
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
                     name:
                       description: Name is a friendly name for this remote cluster
                       type: string

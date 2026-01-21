@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -376,6 +377,30 @@ func (z *ZoneRedundancy) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("invalid ZoneRedundancy object: missing 'atLeast' key")
 	}
 	return fmt.Errorf("invalid ZoneRedundancy format: expected string 'maximum' or object {\"atLeast\": n}")
+}
+
+// ParseZoneRedundancy parses a zone redundancy string like "Maximum" or "AtLeast(2)"
+// from the CRD spec format into the API struct format.
+func ParseZoneRedundancy(s string) (*ZoneRedundancy, error) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "Maximum") {
+		return &ZoneRedundancy{Maximum: true}, nil
+	}
+
+	// Parse "AtLeast(N)" format
+	if strings.HasPrefix(s, "AtLeast(") && strings.HasSuffix(s, ")") {
+		numStr := s[8 : len(s)-1]
+		n, err := strconv.Atoi(numStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid AtLeast value: %s", numStr)
+		}
+		if n < 1 || n > 7 {
+			return nil, fmt.Errorf("AtLeast value must be between 1 and 7, got %d", n)
+		}
+		return &ZoneRedundancy{AtLeast: &n}, nil
+	}
+
+	return nil, fmt.Errorf("invalid zone redundancy format: %s (expected 'Maximum' or 'AtLeast(N)')", s)
 }
 
 // UpdateClusterLayout stages layout changes

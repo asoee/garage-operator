@@ -1955,6 +1955,13 @@ func (r *GarageClusterReconciler) connectToRemoteCluster(
 ) error {
 	log := logf.FromContext(ctx)
 
+	// Skip self-connection: if remote zone matches local zone, this is likely
+	// the same cluster listed in remoteClusters (common in templated deployments)
+	if remote.Zone == cluster.Spec.Zone {
+		log.V(1).Info("Skipping self-connection (remote zone matches local zone)", "zone", remote.Zone)
+		return nil
+	}
+
 	// Get remote admin token
 	remoteToken, err := r.getRemoteAdminToken(ctx, cluster, remote)
 	if err != nil {
@@ -2039,6 +2046,129 @@ func (r *GarageClusterReconciler) connectToRemoteCluster(
 		log.Info("Connected to remote cluster nodes", "name", remote.Name, "connected", connectedCount)
 	}
 
+	// Add remote nodes to local layout for data replication
+	if err := r.addRemoteNodesToLayout(ctx, cluster, localClient, remoteStatus, remote); err != nil {
+		log.Error(err, "Failed to add remote nodes to layout", "cluster", remote.Name)
+		// Don't return error - connection succeeded, layout update is best-effort
+		// Will retry on next reconciliation
+	}
+
+	return nil
+}
+
+// addRemoteNodesToLayout adds remote cluster nodes to the local cluster's layout.
+// This ensures remote nodes participate in data replication with proper zone assignment.
+// It also propagates the cluster's zone redundancy settings to ensure consistent layout parameters.
+func (r *GarageClusterReconciler) addRemoteNodesToLayout(
+	ctx context.Context,
+	cluster *garagev1alpha1.GarageCluster,
+	localClient *garage.Client,
+	remoteStatus *garage.ClusterStatus,
+	remote garagev1alpha1.RemoteClusterConfig,
+) error {
+	log := logf.FromContext(ctx)
+
+	// Get local layout
+	layout, err := localClient.GetClusterLayout(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster layout: %w", err)
+	}
+
+	// Build map of existing nodes (current + staged)
+	existingNodes := make(map[string]bool)
+	for _, role := range layout.Roles {
+		existingNodes[role.ID] = true
+	}
+	for _, staged := range layout.StagedRoleChanges {
+		existingNodes[staged.ID] = true
+	}
+
+	// Build role changes for missing remote nodes
+	var newRoles []garage.NodeRoleChange
+	for _, node := range remoteStatus.Nodes {
+		if existingNodes[node.ID] {
+			continue // Already in layout
+		}
+
+		role := garage.NodeRoleChange{
+			ID:   node.ID,
+			Zone: remote.Zone,           // Use configured zone from CRD
+			Tags: []string{remote.Name}, // Tag with cluster name
+		}
+
+		// Extract capacity from node's current role (if storage node)
+		if node.Role != nil && node.Role.Capacity != nil {
+			role.Capacity = node.Role.Capacity
+		} else if node.Role == nil {
+			// Node not yet in layout - use default capacity from CRD or fallback
+			var defaultCap uint64
+			if remote.DefaultCapacity != nil {
+				defaultCap = uint64(remote.DefaultCapacity.Value())
+			} else {
+				// Default to 100Gi if not specified
+				defaultCap = 100 * 1024 * 1024 * 1024 // 100Gi in bytes
+			}
+			if defaultCap > 0 {
+				role.Capacity = &defaultCap
+			}
+			// defaultCap == 0 means gateway node (nil capacity)
+		}
+		// nil capacity = gateway node (valid in Garage)
+
+		newRoles = append(newRoles, role)
+	}
+
+	if len(newRoles) == 0 {
+		log.V(1).Info("All remote nodes already in layout", "cluster", remote.Name)
+		return nil
+	}
+
+	// Stage changes with zone redundancy parameters from cluster spec
+	log.Info("Adding remote nodes to layout", "cluster", remote.Name, "count", len(newRoles))
+
+	// Build layout update request with zone redundancy if configured
+	layoutReq := garage.UpdateClusterLayoutRequest{
+		Roles: newRoles,
+	}
+
+	// Parse and include zone redundancy from cluster spec for consistency
+	if cluster.Spec.Replication.ZoneRedundancy != "" {
+		zr, err := garage.ParseZoneRedundancy(cluster.Spec.Replication.ZoneRedundancy)
+		if err != nil {
+			log.V(1).Info("Invalid zone redundancy in spec, ignoring", "value", cluster.Spec.Replication.ZoneRedundancy, "error", err)
+		} else {
+			layoutReq.Parameters = &garage.LayoutParameters{
+				ZoneRedundancy: zr,
+			}
+			log.V(1).Info("Including zone redundancy in layout update", "zoneRedundancy", cluster.Spec.Replication.ZoneRedundancy)
+		}
+	}
+
+	if err := localClient.UpdateClusterLayoutWithParams(ctx, layoutReq); err != nil {
+		return fmt.Errorf("failed to stage remote nodes: %w", err)
+	}
+
+	// Re-fetch layout to get current version
+	layout, err = localClient.GetClusterLayout(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get updated layout: %w", err)
+	}
+
+	if len(layout.StagedRoleChanges) == 0 {
+		return nil // Nothing to apply
+	}
+
+	// Apply layout
+	newVersion := layout.Version + 1
+	if err := localClient.ApplyClusterLayout(ctx, newVersion); err != nil {
+		if garage.IsConflict(err) {
+			log.Info("Layout version conflict, will retry on next reconciliation", "version", newVersion)
+			return nil
+		}
+		return fmt.Errorf("failed to apply layout: %w", err)
+	}
+
+	log.Info("Applied federated layout", "cluster", remote.Name, "version", newVersion, "nodesAdded", len(newRoles))
 	return nil
 }
 

@@ -256,6 +256,12 @@ test_key_creation() {
 test_secret_creation() {
     log_test "Testing Secret creation for GarageKey..."
 
+    # Wait for key to be Ready first (secret is only created when key is ready)
+    if ! check_resource_phase "garagekey" "test-key" "Ready" 60; then
+        test_fail "Secret creation failed (key not Ready)"
+        return 1
+    fi
+
     if kubectl get secret test-s3-credentials -n "$NAMESPACE" &>/dev/null; then
         local keys=$(kubectl get secret test-s3-credentials -n "$NAMESPACE" -o jsonpath='{.data}' | jq -r 'keys | join(",")')
         if [[ "$keys" == *"access-key-id"* ]] && [[ "$keys" == *"secret-access-key"* ]]; then
@@ -911,6 +917,12 @@ test_operator_restart() {
 test_secret_ownership() {
     log_test "Testing secret has correct owner reference..."
 
+    # Wait for key to be Ready first (secret is only created when key is ready)
+    if ! check_resource_phase "garagekey" "test-key" "Ready" 60; then
+        test_fail "Secret owner reference - key not Ready"
+        return 1
+    fi
+
     local owner=$(kubectl get secret test-s3-credentials -n "$NAMESPACE" -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
     if [ "$owner" = "GarageKey" ]; then
         test_pass "Secret has correct owner reference (GarageKey)"
@@ -973,14 +985,16 @@ test_cluster_conditions() {
 test_idempotent_apply() {
     log_test "Testing idempotent resource apply..."
 
+    # First wait for cluster to be healthy
+    wait_for_cluster_health "healthy" 60 || true
+
     # Apply same resources again
     kubectl apply -f hack/test-resources.yaml 2>/dev/null
 
     sleep 5
 
-    # Verify everything is still working
-    local health=$(get_cluster_health)
-    if [ "$health" = "healthy" ]; then
+    # Wait for cluster to be healthy again after re-apply
+    if wait_for_cluster_health "healthy" 30; then
         test_pass "Resources are idempotent (re-apply works)"
         return 0
     fi
@@ -1078,6 +1092,12 @@ EOF
 test_s3_list_buckets() {
     log_test "Testing S3 list buckets operation..."
 
+    # Wait for key to be Ready first (secret is only created when key is ready)
+    if ! check_resource_phase "garagekey" "test-key" "Ready" 60; then
+        test_fail "S3 list buckets - key not Ready"
+        return 1
+    fi
+
     # Get credentials from secret
     local access_key=$(kubectl get secret test-s3-credentials -n "$NAMESPACE" -o jsonpath='{.data.access-key-id}' 2>/dev/null | base64 -d)
     local secret_key=$(kubectl get secret test-s3-credentials -n "$NAMESPACE" -o jsonpath='{.data.secret-access-key}' 2>/dev/null | base64 -d)
@@ -1156,6 +1176,12 @@ EOF
 test_cluster_status_fields() {
     log_test "Testing cluster status fields are populated..."
 
+    # Wait for cluster to be Running first
+    if ! check_resource_phase "garagecluster" "garage" "Running" 60; then
+        test_fail "Cluster status fields - cluster not Running"
+        return 1
+    fi
+
     local cluster_id=$(kubectl get garagecluster garage -n "$NAMESPACE" -o jsonpath='{.status.clusterId}' 2>/dev/null)
     local layout_version=$(kubectl get garagecluster garage -n "$NAMESPACE" -o jsonpath='{.status.layoutVersion}' 2>/dev/null)
     local storage_nodes=$(kubectl get garagecluster garage -n "$NAMESPACE" -o jsonpath='{.status.health.storageNodes}' 2>/dev/null)
@@ -1170,6 +1196,12 @@ test_cluster_status_fields() {
 
 test_bucket_status_fields() {
     log_test "Testing bucket status fields are populated..."
+
+    # Wait for bucket to be Ready first
+    if ! check_resource_phase "garagebucket" "test-bucket" "Ready" 60; then
+        test_fail "Bucket status fields - bucket not Ready"
+        return 1
+    fi
 
     local bucket_id=$(kubectl get garagebucket test-bucket -n "$NAMESPACE" -o jsonpath='{.status.bucketId}' 2>/dev/null)
     local global_alias=$(kubectl get garagebucket test-bucket -n "$NAMESPACE" -o jsonpath='{.status.globalAlias}' 2>/dev/null)
@@ -1187,9 +1219,15 @@ test_bucket_status_fields() {
 test_key_status_fields() {
     log_test "Testing key status fields are populated..."
 
+    # Wait for key to be Ready first
+    if ! check_resource_phase "garagekey" "test-key" "Ready" 60; then
+        test_fail "Key status fields - key not Ready"
+        return 1
+    fi
+
     local key_id=$(kubectl get garagekey test-key -n "$NAMESPACE" -o jsonpath='{.status.keyId}' 2>/dev/null)
     local access_key_id=$(kubectl get garagekey test-key -n "$NAMESPACE" -o jsonpath='{.status.accessKeyId}' 2>/dev/null)
-    local secret_ref=$(kubectl get garagekey test-key -n "$NAMESPACE" -o jsonpath='{.status.secretRef}' 2>/dev/null)
+    local secret_ref=$(kubectl get garagekey test-key -n "$NAMESPACE" -o jsonpath='{.status.secretRef.name}' 2>/dev/null)
 
     if [ -n "$key_id" ] && [ -n "$access_key_id" ] && [ -n "$secret_ref" ]; then
         test_pass "Key status fields populated (keyId: ${key_id:0:16}..., accessKeyId: $access_key_id, secretRef: $secret_ref)"
@@ -1850,7 +1888,10 @@ test_pause_reconcile_annotation() {
     # Wait for resources to be reconciled after unpausing
     # This is important for subsequent tests that depend on Ready state
     sleep 5
-    wait_for_cluster_health "healthy" 30 || true
+    wait_for_cluster_health "healthy" 60 || true
+    # Also wait for bucket and key to be Ready (subsequent update tests depend on these)
+    check_resource_phase "garagebucket" "quota-test-bucket" "Ready" 30 || true
+    check_resource_phase "garagekey" "multi-bucket-key" "Ready" 30 || true
 
     # If generation didn't change, reconciliation was paused
     # Note: This test is informational - pause may or may not be implemented

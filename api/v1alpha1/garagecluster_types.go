@@ -935,6 +935,12 @@ type RemoteClusterConfig struct {
 	// Connection defines how to connect to this remote cluster
 	// +required
 	Connection RemoteClusterConnection `json:"connection"`
+
+	// DefaultCapacity is the default storage capacity to assign to remote nodes
+	// that don't yet have a role in the layout. If not specified, defaults to 100Gi.
+	// Set to "0" to add nodes as gateway-only (no storage).
+	// +optional
+	DefaultCapacity *resource.Quantity `json:"defaultCapacity,omitempty"`
 }
 
 // RemoteClusterConnection defines how to connect to a remote cluster
