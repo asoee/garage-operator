@@ -22,10 +22,8 @@ import (
 	"regexp"
 	"strconv"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -33,8 +31,7 @@ var garageclusterlog = logf.Log.WithName("garagecluster-resource")
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *GarageCluster) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithDefaulter(&GarageClusterDefaulter{}).
 		WithValidator(&GarageClusterValidator{}).
 		Complete()
@@ -42,33 +39,28 @@ func (r *GarageCluster) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:webhook:path=/mutate-garage-garage-rajsingh-info-v1alpha1-garagecluster,mutating=true,failurePolicy=fail,sideEffects=None,groups=garage.garage.rajsingh.info,resources=garageclusters,verbs=create;update,versions=v1alpha1,name=mgaragecluster.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomDefaulter = &GarageClusterDefaulter{}
+var _ admission.Defaulter[*GarageCluster] = &GarageClusterDefaulter{}
 
 // GarageClusterDefaulter handles defaulting for GarageCluster.
 type GarageClusterDefaulter struct{}
 
-// Default implements webhook.CustomDefaulter so a webhook will be registered for the type.
-func (d *GarageClusterDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	r, ok := obj.(*GarageCluster)
-	if !ok {
-		return fmt.Errorf("expected GarageCluster but got %T", obj)
-	}
-
-	garageclusterlog.Info("default", "name", r.Name)
+// Default implements admission.Defaulter so a webhook will be registered for the type.
+func (d *GarageClusterDefaulter) Default(ctx context.Context, obj *GarageCluster) error {
+	garageclusterlog.Info("default", "name", obj.Name)
 
 	// Set default layout policy if not specified
-	if r.Spec.LayoutPolicy == "" {
-		r.Spec.LayoutPolicy = "Auto"
+	if obj.Spec.LayoutPolicy == "" {
+		obj.Spec.LayoutPolicy = "Auto"
 	}
 
 	// Set default replication factor if not specified
-	if r.Spec.Replication.Factor == 0 {
-		r.Spec.Replication.Factor = 3
+	if obj.Spec.Replication.Factor == 0 {
+		obj.Spec.Replication.Factor = 3
 	}
 
 	// Set default consistency mode if not specified
-	if r.Spec.Replication.ConsistencyMode == "" {
-		r.Spec.Replication.ConsistencyMode = "consistent"
+	if obj.Spec.Replication.ConsistencyMode == "" {
+		obj.Spec.Replication.ConsistencyMode = "consistent"
 	}
 
 	return nil
@@ -76,58 +68,37 @@ func (d *GarageClusterDefaulter) Default(ctx context.Context, obj runtime.Object
 
 // +kubebuilder:webhook:path=/validate-garage-garage-rajsingh-info-v1alpha1-garagecluster,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.garage.rajsingh.info,resources=garageclusters,verbs=create;update,versions=v1alpha1,name=vgaragecluster.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &GarageClusterValidator{}
+var _ admission.Validator[*GarageCluster] = &GarageClusterValidator{}
 
 // GarageClusterValidator handles validation for GarageCluster.
 type GarageClusterValidator struct{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageClusterValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageCluster)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageCluster but got %T", obj)
-	}
-
-	garageclusterlog.Info("validate create", "name", r.Name)
-	return r.validateGarageCluster()
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageClusterValidator) ValidateCreate(ctx context.Context, obj *GarageCluster) (admission.Warnings, error) {
+	garageclusterlog.Info("validate create", "name", obj.Name)
+	return obj.validateGarageCluster()
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageClusterValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	r, ok := newObj.(*GarageCluster)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageCluster but got %T", newObj)
-	}
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageClusterValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *GarageCluster) (admission.Warnings, error) {
+	garageclusterlog.Info("validate update", "name", newObj.Name)
 
-	garageclusterlog.Info("validate update", "name", r.Name)
-
-	warnings, err := r.validateGarageCluster()
+	warnings, err := newObj.validateGarageCluster()
 	if err != nil {
 		return warnings, err
 	}
 
-	// Check for immutable field changes
-	oldCluster, ok := oldObj.(*GarageCluster)
-	if !ok {
-		return warnings, fmt.Errorf("expected GarageCluster but got %T", oldObj)
-	}
-
 	// Replication factor cannot be changed after cluster creation
-	if oldCluster.Spec.Replication.Factor != 0 && r.Spec.Replication.Factor != oldCluster.Spec.Replication.Factor {
+	if oldObj.Spec.Replication.Factor != 0 && newObj.Spec.Replication.Factor != oldObj.Spec.Replication.Factor {
 		warnings = append(warnings, "Changing replication factor on an existing cluster requires careful data migration")
 	}
 
 	return warnings, nil
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageClusterValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageCluster)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageCluster but got %T", obj)
-	}
-
-	garageclusterlog.Info("validate delete", "name", r.Name)
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageClusterValidator) ValidateDelete(ctx context.Context, obj *GarageCluster) (admission.Warnings, error) {
+	garageclusterlog.Info("validate delete", "name", obj.Name)
 	return nil, nil
 }
 

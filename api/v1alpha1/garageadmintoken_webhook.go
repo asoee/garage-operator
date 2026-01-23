@@ -20,10 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -31,49 +29,33 @@ var garageadmintokenlog = logf.Log.WithName("garageadmintoken-resource")
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *GarageAdminToken) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithValidator(&GarageAdminTokenValidator{}).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/validate-garage-garage-rajsingh-info-v1alpha1-garageadmintoken,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.garage.rajsingh.info,resources=garageadmintokens,verbs=create;update,versions=v1alpha1,name=vgarageadmintoken.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &GarageAdminTokenValidator{}
+var _ admission.Validator[*GarageAdminToken] = &GarageAdminTokenValidator{}
 
 // GarageAdminTokenValidator handles validation for GarageAdminToken.
 type GarageAdminTokenValidator struct{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageAdminTokenValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageAdminToken)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageAdminToken but got %T", obj)
-	}
-
-	garageadmintokenlog.Info("validate create", "name", r.Name)
-	return r.validateGarageAdminToken()
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageAdminTokenValidator) ValidateCreate(ctx context.Context, obj *GarageAdminToken) (admission.Warnings, error) {
+	garageadmintokenlog.Info("validate create", "name", obj.Name)
+	return obj.validateGarageAdminToken()
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageAdminTokenValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	r, ok := newObj.(*GarageAdminToken)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageAdminToken but got %T", newObj)
-	}
-
-	garageadmintokenlog.Info("validate update", "name", r.Name)
-	return r.validateGarageAdminToken()
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageAdminTokenValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *GarageAdminToken) (admission.Warnings, error) {
+	garageadmintokenlog.Info("validate update", "name", newObj.Name)
+	return newObj.validateGarageAdminToken()
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageAdminTokenValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageAdminToken)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageAdminToken but got %T", obj)
-	}
-
-	garageadmintokenlog.Info("validate delete", "name", r.Name)
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageAdminTokenValidator) ValidateDelete(ctx context.Context, obj *GarageAdminToken) (admission.Warnings, error) {
+	garageadmintokenlog.Info("validate delete", "name", obj.Name)
 	return nil, nil
 }
 

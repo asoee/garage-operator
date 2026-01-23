@@ -21,10 +21,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -32,8 +30,7 @@ var garagenodelog = logf.Log.WithName("garagenode-resource")
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *GarageNode) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithDefaulter(&GarageNodeDefaulter{}).
 		WithValidator(&GarageNodeValidator{}).
 		Complete()
@@ -41,23 +38,18 @@ func (r *GarageNode) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:webhook:path=/mutate-garage-rajsingh-info-v1alpha1-garagenode,mutating=true,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagenodes,verbs=create;update,versions=v1alpha1,name=mgaragenode.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomDefaulter = &GarageNodeDefaulter{}
+var _ admission.Defaulter[*GarageNode] = &GarageNodeDefaulter{}
 
 // GarageNodeDefaulter handles defaulting for GarageNode.
 type GarageNodeDefaulter struct{}
 
-// Default implements webhook.CustomDefaulter so a webhook will be registered for the type.
-func (d *GarageNodeDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	r, ok := obj.(*GarageNode)
-	if !ok {
-		return fmt.Errorf("expected GarageNode but got %T", obj)
-	}
-
-	garagenodelog.Info("default", "name", r.Name)
+// Default implements admission.Defaulter so a webhook will be registered for the type.
+func (d *GarageNodeDefaulter) Default(ctx context.Context, obj *GarageNode) error {
+	garagenodelog.Info("default", "name", obj.Name)
 
 	// Set default external port
-	if r.Spec.External != nil && r.Spec.External.Port == 0 {
-		r.Spec.External.Port = 3901
+	if obj.Spec.External != nil && obj.Spec.External.Port == 0 {
+		obj.Spec.External.Port = 3901
 	}
 
 	return nil
@@ -65,41 +57,26 @@ func (d *GarageNodeDefaulter) Default(ctx context.Context, obj runtime.Object) e
 
 // +kubebuilder:webhook:path=/validate-garage-rajsingh-info-v1alpha1-garagenode,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagenodes,verbs=create;update,versions=v1alpha1,name=vgaragenode.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &GarageNodeValidator{}
+var _ admission.Validator[*GarageNode] = &GarageNodeValidator{}
 
 // GarageNodeValidator handles validation for GarageNode.
 type GarageNodeValidator struct{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageNodeValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageNode)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageNode but got %T", obj)
-	}
-
-	garagenodelog.Info("validate create", "name", r.Name)
-	return r.validateGarageNode()
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageNodeValidator) ValidateCreate(ctx context.Context, obj *GarageNode) (admission.Warnings, error) {
+	garagenodelog.Info("validate create", "name", obj.Name)
+	return obj.validateGarageNode()
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageNodeValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	r, ok := newObj.(*GarageNode)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageNode but got %T", newObj)
-	}
-
-	garagenodelog.Info("validate update", "name", r.Name)
-	return r.validateGarageNode()
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageNodeValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *GarageNode) (admission.Warnings, error) {
+	garagenodelog.Info("validate update", "name", newObj.Name)
+	return newObj.validateGarageNode()
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageNodeValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageNode)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageNode but got %T", obj)
-	}
-
-	garagenodelog.Info("validate delete", "name", r.Name)
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageNodeValidator) ValidateDelete(ctx context.Context, obj *GarageNode) (admission.Warnings, error) {
+	garagenodelog.Info("validate delete", "name", obj.Name)
 	return nil, nil
 }
 

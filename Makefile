@@ -166,11 +166,6 @@ test-e2e-multicluster: ## Run multi-cluster E2E tests (2 kind clusters)
 	@chmod +x hack/e2e-multicluster.sh
 	@hack/e2e-multicluster.sh
 
-.PHONY: test-e2e-cosi
-test-e2e-cosi: ## Run COSI E2E tests
-	@chmod +x hack/e2e-cosi.sh
-	@hack/e2e-cosi.sh
-
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run

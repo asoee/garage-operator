@@ -22,10 +22,8 @@ import (
 	"regexp"
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -33,8 +31,7 @@ var garagekeylog = logf.Log.WithName("garagekey-resource")
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *GarageKey) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithDefaulter(&GarageKeyDefaulter{}).
 		WithValidator(&GarageKeyValidator{}).
 		Complete()
@@ -42,44 +39,39 @@ func (r *GarageKey) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:webhook:path=/mutate-garage-rajsingh-info-v1alpha1-garagekey,mutating=true,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagekeys,verbs=create;update,versions=v1alpha1,name=mgaragekey.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomDefaulter = &GarageKeyDefaulter{}
+var _ admission.Defaulter[*GarageKey] = &GarageKeyDefaulter{}
 
 // GarageKeyDefaulter handles defaulting for GarageKey.
 type GarageKeyDefaulter struct{}
 
-// Default implements webhook.CustomDefaulter so a webhook will be registered for the type.
-func (d *GarageKeyDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	r, ok := obj.(*GarageKey)
-	if !ok {
-		return fmt.Errorf("expected GarageKey but got %T", obj)
-	}
-
-	garagekeylog.Info("default", "name", r.Name)
+// Default implements admission.Defaulter so a webhook will be registered for the type.
+func (d *GarageKeyDefaulter) Default(ctx context.Context, obj *GarageKey) error {
+	garagekeylog.Info("default", "name", obj.Name)
 
 	// Set default name to metadata.name if not specified
-	if r.Spec.Name == "" {
-		r.Spec.Name = r.Name
+	if obj.Spec.Name == "" {
+		obj.Spec.Name = obj.Name
 	}
 
 	// Set default secret template settings
-	if r.Spec.SecretTemplate != nil {
-		if r.Spec.SecretTemplate.Name == "" {
-			r.Spec.SecretTemplate.Name = r.Name
+	if obj.Spec.SecretTemplate != nil {
+		if obj.Spec.SecretTemplate.Name == "" {
+			obj.Spec.SecretTemplate.Name = obj.Name
 		}
-		if r.Spec.SecretTemplate.Type == "" {
-			r.Spec.SecretTemplate.Type = "Opaque"
+		if obj.Spec.SecretTemplate.Type == "" {
+			obj.Spec.SecretTemplate.Type = "Opaque"
 		}
-		if r.Spec.SecretTemplate.AccessKeyIDKey == "" {
-			r.Spec.SecretTemplate.AccessKeyIDKey = "access-key-id"
+		if obj.Spec.SecretTemplate.AccessKeyIDKey == "" {
+			obj.Spec.SecretTemplate.AccessKeyIDKey = "access-key-id"
 		}
-		if r.Spec.SecretTemplate.SecretAccessKeyKey == "" {
-			r.Spec.SecretTemplate.SecretAccessKeyKey = "secret-access-key"
+		if obj.Spec.SecretTemplate.SecretAccessKeyKey == "" {
+			obj.Spec.SecretTemplate.SecretAccessKeyKey = "secret-access-key"
 		}
-		if r.Spec.SecretTemplate.EndpointKey == "" {
-			r.Spec.SecretTemplate.EndpointKey = "endpoint"
+		if obj.Spec.SecretTemplate.EndpointKey == "" {
+			obj.Spec.SecretTemplate.EndpointKey = "endpoint"
 		}
-		if r.Spec.SecretTemplate.RegionKey == "" {
-			r.Spec.SecretTemplate.RegionKey = "region"
+		if obj.Spec.SecretTemplate.RegionKey == "" {
+			obj.Spec.SecretTemplate.RegionKey = "region"
 		}
 	}
 
@@ -88,41 +80,26 @@ func (d *GarageKeyDefaulter) Default(ctx context.Context, obj runtime.Object) er
 
 // +kubebuilder:webhook:path=/validate-garage-rajsingh-info-v1alpha1-garagekey,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagekeys,verbs=create;update,versions=v1alpha1,name=vgaragekey.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &GarageKeyValidator{}
+var _ admission.Validator[*GarageKey] = &GarageKeyValidator{}
 
 // GarageKeyValidator handles validation for GarageKey.
 type GarageKeyValidator struct{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageKeyValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageKey)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageKey but got %T", obj)
-	}
-
-	garagekeylog.Info("validate create", "name", r.Name)
-	return r.validateGarageKey()
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageKeyValidator) ValidateCreate(ctx context.Context, obj *GarageKey) (admission.Warnings, error) {
+	garagekeylog.Info("validate create", "name", obj.Name)
+	return obj.validateGarageKey()
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageKeyValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	r, ok := newObj.(*GarageKey)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageKey but got %T", newObj)
-	}
-
-	garagekeylog.Info("validate update", "name", r.Name)
-	return r.validateGarageKey()
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageKeyValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *GarageKey) (admission.Warnings, error) {
+	garagekeylog.Info("validate update", "name", newObj.Name)
+	return newObj.validateGarageKey()
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageKeyValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageKey)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageKey but got %T", obj)
-	}
-
-	garagekeylog.Info("validate delete", "name", r.Name)
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageKeyValidator) ValidateDelete(ctx context.Context, obj *GarageKey) (admission.Warnings, error) {
+	garagekeylog.Info("validate delete", "name", obj.Name)
 	return nil, nil
 }
 

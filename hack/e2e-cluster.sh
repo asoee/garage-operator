@@ -1082,6 +1082,353 @@ EOF
     return 1
 }
 
+test_webapi_endpoint() {
+    log_test "Testing Web API endpoint serves website content..."
+
+    local web_cluster="webapi-test-cluster"
+    local web_bucket="webapi-test-site"
+    local web_key="webapi-test-key"
+    local web_root_domain=".web.garage.local"
+
+    # Create RPC secret for the web cluster
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${web_cluster}-rpc-secret
+  namespace: $NAMESPACE
+type: Opaque
+data:
+  rpc-secret: YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OQ==
+EOF
+
+    # Create admin token
+    cat <<EOF | kubectl apply -f -
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageAdminToken
+metadata:
+  name: ${web_cluster}-admin
+  namespace: $NAMESPACE
+spec:
+  clusterRef:
+    name: $web_cluster
+EOF
+
+    # Create a single-node cluster with WebAPI enabled
+    cat <<EOF | kubectl apply -f -
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageCluster
+metadata:
+  name: $web_cluster
+  namespace: $NAMESPACE
+spec:
+  replicas: 1
+  image: dxflrs/garage:v2.1.0
+  zone: test-zone
+  replication:
+    factor: 1
+  storage:
+    metadata:
+      size: 1Gi
+    data:
+      size: 5Gi
+  network:
+    rpcBindPort: 3901
+    rpcSecretRef:
+      name: ${web_cluster}-rpc-secret
+      key: rpc-secret
+  s3Api:
+    enabled: true
+    bindPort: 3900
+    region: garage
+  webApi:
+    enabled: true
+    bindPort: 3902
+    rootDomain: "$web_root_domain"
+  admin:
+    enabled: true
+    bindPort: 3903
+    adminTokenSecretRef:
+      name: ${web_cluster}-admin
+      key: admin-token
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+EOF
+
+    # Wait for cluster to be ready (GarageCluster uses "Running" phase, not "Ready")
+    if ! check_resource_phase "garagecluster" "$web_cluster" "Running" 180; then
+        test_fail "Web API test cluster did not become ready"
+        kubectl delete garagecluster "$web_cluster" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete garageadmintoken "${web_cluster}-admin" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete secret "${web_cluster}-rpc-secret" -n "$NAMESPACE" 2>/dev/null || true
+        return 1
+    fi
+
+    # Create bucket with website hosting
+    cat <<EOF | kubectl apply -f -
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageBucket
+metadata:
+  name: $web_bucket
+  namespace: $NAMESPACE
+spec:
+  clusterRef:
+    name: $web_cluster
+  globalAlias: $web_bucket
+  website:
+    enabled: true
+    indexDocument: index.html
+    errorDocument: error.html
+EOF
+
+    # Create key with permissions
+    cat <<EOF | kubectl apply -f -
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: $web_key
+  namespace: $NAMESPACE
+spec:
+  clusterRef:
+    name: $web_cluster
+  bucketPermissions:
+    - bucketRef: $web_bucket
+      read: true
+      write: true
+      owner: true
+  secretTemplate:
+    name: $web_key
+    includeEndpoint: true
+    includeRegion: true
+EOF
+
+    # Wait for bucket and key to be ready
+    if ! check_resource_phase "garagebucket" "$web_bucket" "Ready" 60; then
+        test_fail "Web API test bucket did not become ready"
+        kubectl delete garagebucket "$web_bucket" -n "$NAMESPACE" 2>/dev/null || true
+        kubectl delete garagekey "$web_key" -n "$NAMESPACE" 2>/dev/null || true
+        kubectl delete garagecluster "$web_cluster" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete garageadmintoken "${web_cluster}-admin" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete secret "${web_cluster}-rpc-secret" -n "$NAMESPACE" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! check_resource_phase "garagekey" "$web_key" "Ready" 60; then
+        test_fail "Web API test key did not become ready"
+        kubectl delete garagebucket "$web_bucket" -n "$NAMESPACE" 2>/dev/null || true
+        kubectl delete garagekey "$web_key" -n "$NAMESPACE" 2>/dev/null || true
+        kubectl delete garagecluster "$web_cluster" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete garageadmintoken "${web_cluster}-admin" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete secret "${web_cluster}-rpc-secret" -n "$NAMESPACE" 2>/dev/null || true
+        return 1
+    fi
+
+    # Get S3 credentials (default key names are access-key-id and secret-access-key)
+    local access_key=$(kubectl get secret "$web_key" -n "$NAMESPACE" -o jsonpath='{.data.access-key-id}' 2>/dev/null | base64 -d)
+    local secret_key=$(kubectl get secret "$web_key" -n "$NAMESPACE" -o jsonpath='{.data.secret-access-key}' 2>/dev/null | base64 -d)
+
+    if [ -z "$access_key" ] || [ -z "$secret_key" ]; then
+        test_fail "Could not retrieve S3 credentials for Web API test"
+        kubectl delete garagebucket "$web_bucket" -n "$NAMESPACE" 2>/dev/null || true
+        kubectl delete garagekey "$web_key" -n "$NAMESPACE" 2>/dev/null || true
+        kubectl delete garagecluster "$web_cluster" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete garageadmintoken "${web_cluster}-admin" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+        kubectl delete secret "${web_cluster}-rpc-secret" -n "$NAMESPACE" 2>/dev/null || true
+        return 1
+    fi
+
+    # Upload index.html using a job
+    local index_content="<html><body><h1>Hello from Garage Web API!</h1></body></html>"
+    local index_content_b64=$(echo -n "$index_content" | base64 -w0)
+
+    cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: webapi-upload-index
+  namespace: $NAMESPACE
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: upload
+        image: amazon/aws-cli:latest
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "$access_key"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "$secret_key"
+        - name: AWS_DEFAULT_REGION
+          value: "garage"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "$index_content_b64" | base64 -d > /tmp/index.html
+          aws --endpoint-url http://${web_cluster}.${NAMESPACE}.svc.cluster.local:3900 \
+            s3 cp /tmp/index.html s3://${web_bucket}/index.html \
+            --content-type "text/html"
+        securityContext:
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+EOF
+
+    # Wait for upload job to complete
+    local end_time=$((SECONDS + 120))
+    while [ $SECONDS -lt $end_time ]; do
+        local job_status=$(kubectl get job webapi-upload-index -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null)
+        if [ "$job_status" = "1" ]; then
+            log_info "Index upload succeeded"
+            break
+        fi
+        local job_failed=$(kubectl get job webapi-upload-index -n "$NAMESPACE" -o jsonpath='{.status.failed}' 2>/dev/null)
+        if [ "$job_failed" = "1" ]; then
+            log_error "Index upload failed"
+            kubectl logs job/webapi-upload-index -n "$NAMESPACE" 2>/dev/null || true
+            test_fail "Web API index upload failed"
+            kubectl delete job webapi-upload-index -n "$NAMESPACE" 2>/dev/null || true
+            kubectl delete garagebucket "$web_bucket" -n "$NAMESPACE" 2>/dev/null || true
+            kubectl delete garagekey "$web_key" -n "$NAMESPACE" 2>/dev/null || true
+            kubectl delete garagecluster "$web_cluster" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+            kubectl delete garageadmintoken "${web_cluster}-admin" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+            kubectl delete secret "${web_cluster}-rpc-secret" -n "$NAMESPACE" 2>/dev/null || true
+            return 1
+        fi
+        sleep 5
+    done
+
+    # Test accessing the website via Web API
+    # The Host header should be: <bucket>.<rootDomain> (without leading dot)
+    # web_root_domain has leading dot (e.g., ".web.garage.local")
+    # We need: <bucket>.<rootDomain without leading dot> = webapi-test-site.web.garage.local
+    local web_host="${web_bucket}.${web_root_domain#.}"
+    local web_service_url="http://${web_cluster}.${NAMESPACE}.svc.cluster.local:3902/"
+
+    # Create a pod to curl the web endpoint
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: webapi-curl-test
+  namespace: $NAMESPACE
+spec:
+  restartPolicy: Never
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command:
+    - curl
+    - -s
+    - -H
+    - "Host: $web_host"
+    - "$web_service_url"
+    securityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 1000
+EOF
+
+    # Wait for curl pod to complete
+    end_time=$((SECONDS + 60))
+    while [ $SECONDS -lt $end_time ]; do
+        local pod_phase=$(kubectl get pod webapi-curl-test -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+        if [ "$pod_phase" = "Succeeded" ]; then
+            break
+        fi
+        if [ "$pod_phase" = "Failed" ]; then
+            log_error "Curl pod failed"
+            kubectl logs webapi-curl-test -n "$NAMESPACE" 2>/dev/null || true
+            test_fail "Web API curl request failed"
+            kubectl delete pod webapi-curl-test -n "$NAMESPACE" 2>/dev/null || true
+            kubectl delete job webapi-upload-index -n "$NAMESPACE" 2>/dev/null || true
+            kubectl delete garagebucket "$web_bucket" -n "$NAMESPACE" 2>/dev/null || true
+            kubectl delete garagekey "$web_key" -n "$NAMESPACE" 2>/dev/null || true
+            kubectl delete garagecluster "$web_cluster" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+            kubectl delete garageadmintoken "${web_cluster}-admin" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+            kubectl delete secret "${web_cluster}-rpc-secret" -n "$NAMESPACE" 2>/dev/null || true
+            return 1
+        fi
+        sleep 2
+    done
+
+    # Get the response
+    local response=$(kubectl logs webapi-curl-test -n "$NAMESPACE" 2>/dev/null)
+
+    # Clean up - must delete objects from bucket before deleting bucket
+    kubectl delete pod webapi-curl-test -n "$NAMESPACE" 2>/dev/null || true
+    kubectl delete job webapi-upload-index -n "$NAMESPACE" 2>/dev/null || true
+
+    # Delete objects from bucket using S3 API before deleting bucket
+    cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: webapi-cleanup
+  namespace: $NAMESPACE
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: cleanup
+        image: amazon/aws-cli:latest
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "$access_key"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "$secret_key"
+        - name: AWS_DEFAULT_REGION
+          value: "garage"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          aws --endpoint-url http://${web_cluster}.${NAMESPACE}.svc.cluster.local:3900 \
+            s3 rm s3://${web_bucket}/ --recursive || true
+        securityContext:
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+EOF
+
+    # Wait for cleanup job to complete (short timeout, best effort)
+    local cleanup_end=$((SECONDS + 30))
+    while [ $SECONDS -lt $cleanup_end ]; do
+        local cleanup_status=$(kubectl get job webapi-cleanup -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null)
+        if [ "$cleanup_status" = "1" ]; then
+            break
+        fi
+        sleep 2
+    done
+    kubectl delete job webapi-cleanup -n "$NAMESPACE" 2>/dev/null || true
+
+    # Now delete the bucket and other resources (use --wait=false to avoid blocking on finalizers)
+    kubectl delete garagebucket "$web_bucket" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+    kubectl delete garagekey "$web_key" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+    kubectl delete garagecluster "$web_cluster" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+    kubectl delete garageadmintoken "${web_cluster}-admin" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+    kubectl delete secret "${web_cluster}-rpc-secret" -n "$NAMESPACE" --wait=false 2>/dev/null || true
+
+    # Verify the response contains our content
+    if echo "$response" | grep -q "Hello from Garage Web API!"; then
+        test_pass "Web API endpoint correctly serves website content"
+        return 0
+    fi
+
+    log_error "Expected 'Hello from Garage Web API!' in response, got: $response"
+    test_fail "Web API endpoint did not serve expected content"
+    return 1
+}
+
 # ============================================================================
 # S3 Operations Tests (using curl for basic operations)
 # ============================================================================
@@ -2071,10 +2418,20 @@ test_recreate_after_deletion() {
     kubectl apply -f hack/test-resources.yaml
 
     if wait_for_pods_ready "app.kubernetes.io/instance=garage" 3 "$TIMEOUT"; then
-        sleep 15
-        if check_resource_phase "garagecluster" "garage" "Running" 60; then
-            test_pass "Cluster successfully recreated after deletion"
-            return 0
+        # Wait for cluster to become healthy (bootstrap, connect nodes, apply layout)
+        if wait_for_cluster_health 300; then
+            # Check cluster phase is Running
+            if check_resource_phase "garagecluster" "garage" "Running" 30; then
+                test_pass "Cluster successfully recreated after deletion"
+                return 0
+            fi
+        else
+            # Even if not fully healthy, check if Running phase is set
+            # (health can be degraded during partition sync)
+            if check_resource_phase "garagecluster" "garage" "Running" 30; then
+                test_pass "Cluster recreated (phase Running, partition sync may be in progress)"
+                return 0
+            fi
         fi
     fi
     test_fail "Cluster recreation failed"
@@ -2199,6 +2556,7 @@ main() {
     test_key_permissions || true
     test_key_without_secret || true
     test_website_bucket || true
+    test_webapi_endpoint || true
     test_local_alias_creation || true
     test_key_expiration || true
     test_key_never_expires || true

@@ -830,6 +830,24 @@ func buildContainerPorts(cluster *garagev1alpha1.GarageCluster) []corev1.Contain
 		ports = append(ports, corev1.ContainerPort{Name: "admin", ContainerPort: adminPort})
 	}
 
+	// K2V API port
+	if cluster.Spec.K2VAPI != nil && cluster.Spec.K2VAPI.Enabled {
+		k2vPort := int32(3904)
+		if cluster.Spec.K2VAPI.BindPort != 0 {
+			k2vPort = cluster.Spec.K2VAPI.BindPort
+		}
+		ports = append(ports, corev1.ContainerPort{Name: "k2v", ContainerPort: k2vPort})
+	}
+
+	// Web API port
+	if cluster.Spec.WebAPI != nil && cluster.Spec.WebAPI.Enabled {
+		webPort := int32(3902)
+		if cluster.Spec.WebAPI.BindPort != 0 {
+			webPort = cluster.Spec.WebAPI.BindPort
+		}
+		ports = append(ports, corev1.ContainerPort{Name: "web", ContainerPort: webPort})
+	}
+
 	return ports
 }
 

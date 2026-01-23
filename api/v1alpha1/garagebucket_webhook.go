@@ -20,10 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -31,8 +29,7 @@ var garagebucketlog = logf.Log.WithName("garagebucket-resource")
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *GarageBucket) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithDefaulter(&GarageBucketDefaulter{}).
 		WithValidator(&GarageBucketValidator{}).
 		Complete()
@@ -40,28 +37,23 @@ func (r *GarageBucket) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:webhook:path=/mutate-garage-rajsingh-info-v1alpha1-garagebucket,mutating=true,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagebuckets,verbs=create;update,versions=v1alpha1,name=mgaragebucket.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomDefaulter = &GarageBucketDefaulter{}
+var _ admission.Defaulter[*GarageBucket] = &GarageBucketDefaulter{}
 
 // GarageBucketDefaulter handles defaulting for GarageBucket.
 type GarageBucketDefaulter struct{}
 
-// Default implements webhook.CustomDefaulter so a webhook will be registered for the type.
-func (d *GarageBucketDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	r, ok := obj.(*GarageBucket)
-	if !ok {
-		return fmt.Errorf("expected GarageBucket but got %T", obj)
-	}
-
-	garagebucketlog.Info("default", "name", r.Name)
+// Default implements admission.Defaulter so a webhook will be registered for the type.
+func (d *GarageBucketDefaulter) Default(ctx context.Context, obj *GarageBucket) error {
+	garagebucketlog.Info("default", "name", obj.Name)
 
 	// Set default global alias to metadata.name if not specified
-	if r.Spec.GlobalAlias == "" {
-		r.Spec.GlobalAlias = r.Name
+	if obj.Spec.GlobalAlias == "" {
+		obj.Spec.GlobalAlias = obj.Name
 	}
 
 	// Default website index document
-	if r.Spec.Website != nil && r.Spec.Website.Enabled && r.Spec.Website.IndexDocument == "" {
-		r.Spec.Website.IndexDocument = "index.html"
+	if obj.Spec.Website != nil && obj.Spec.Website.Enabled && obj.Spec.Website.IndexDocument == "" {
+		obj.Spec.Website.IndexDocument = "index.html"
 	}
 
 	return nil
@@ -69,41 +61,26 @@ func (d *GarageBucketDefaulter) Default(ctx context.Context, obj runtime.Object)
 
 // +kubebuilder:webhook:path=/validate-garage-rajsingh-info-v1alpha1-garagebucket,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garagebuckets,verbs=create;update,versions=v1alpha1,name=vgaragebucket.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &GarageBucketValidator{}
+var _ admission.Validator[*GarageBucket] = &GarageBucketValidator{}
 
 // GarageBucketValidator handles validation for GarageBucket.
 type GarageBucketValidator struct{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageBucketValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageBucket)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageBucket but got %T", obj)
-	}
-
-	garagebucketlog.Info("validate create", "name", r.Name)
-	return r.validateGarageBucket()
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageBucketValidator) ValidateCreate(ctx context.Context, obj *GarageBucket) (admission.Warnings, error) {
+	garagebucketlog.Info("validate create", "name", obj.Name)
+	return obj.validateGarageBucket()
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageBucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	r, ok := newObj.(*GarageBucket)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageBucket but got %T", newObj)
-	}
-
-	garagebucketlog.Info("validate update", "name", r.Name)
-	return r.validateGarageBucket()
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageBucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *GarageBucket) (admission.Warnings, error) {
+	garagebucketlog.Info("validate update", "name", newObj.Name)
+	return newObj.validateGarageBucket()
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
-func (v *GarageBucketValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*GarageBucket)
-	if !ok {
-		return nil, fmt.Errorf("expected GarageBucket but got %T", obj)
-	}
-
-	garagebucketlog.Info("validate delete", "name", r.Name)
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type.
+func (v *GarageBucketValidator) ValidateDelete(ctx context.Context, obj *GarageBucket) (admission.Warnings, error) {
+	garagebucketlog.Info("validate delete", "name", obj.Name)
 	return nil, nil
 }
 
