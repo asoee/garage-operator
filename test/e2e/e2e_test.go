@@ -268,15 +268,52 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+		It("should remain stable with no garage resources defined", func() {
+			By("verifying no garage resources exist")
+			cmd := exec.Command("kubectl", "get", "garageclusters,garagebuckets,garagekeys,garagenodes", "-A", "--no-headers")
+			output, _ := utils.Run(cmd)
+			// It's OK if the command errors (no resources found) or returns empty
+			Expect(output).To(Or(BeEmpty(), ContainSubstring("No resources found")),
+				"Expected no garage resources to exist for this test")
+
+			By("waiting to verify operator stability (no crash loops)")
+			// Wait 30 seconds and verify operator has 0 restarts
+			time.Sleep(30 * time.Second)
+
+			verifyNoRestarts := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", controllerPodName, "-n", namespace,
+					"-o", "jsonpath={.status.containerStatuses[0].restartCount}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("0"), "Operator should not have restarted")
+			}
+			Eventually(verifyNoRestarts, time.Minute).Should(Succeed())
+
+			By("verifying health endpoints are responding")
+			// Check liveness probe is working
+			verifyHealth := func(g Gomega) {
+				cmd := exec.Command("kubectl", "exec", controllerPodName, "-n", namespace, "--",
+					"wget", "-q", "-O-", "http://localhost:8081/healthz")
+				// exec won't work on distroless, so just check the pod is ready
+				cmd = exec.Command("kubectl", "get", "pod", controllerPodName, "-n", namespace,
+					"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("True"), "Operator pod should be ready")
+			}
+			Eventually(verifyHealth, time.Minute).Should(Succeed())
+
+			By("verifying operator logs show startup information")
+			verifyLogs := func(g Gomega) {
+				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				// Verify essential startup logs are present
+				g.Expect(output).To(ContainSubstring("starting manager"), "Should log manager startup")
+				g.Expect(output).To(ContainSubstring("Starting Controller"), "Should log controller startup")
+			}
+			Eventually(verifyLogs, time.Minute).Should(Succeed())
+		})
 	})
 })
 

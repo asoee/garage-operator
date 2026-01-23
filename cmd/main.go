@@ -21,12 +21,14 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"runtime"
+	"runtime/debug"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -44,7 +46,12 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
+	// Version information set at build time
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+
+	scheme   = k8sruntime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
 
@@ -100,6 +107,21 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Log version and runtime information at startup for debugging
+	buildInfo, _ := debug.ReadBuildInfo()
+	goVersion := "unknown"
+	if buildInfo != nil {
+		goVersion = buildInfo.GoVersion
+	}
+	setupLog.Info("garage-operator starting",
+		"version", version,
+		"commit", commit,
+		"buildDate", buildDate,
+		"goVersion", goVersion,
+		"GOMAXPROCS", runtime.GOMAXPROCS(0),
+		"GOMEMLIMIT", os.Getenv("GOMEMLIMIT"),
+	)
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
