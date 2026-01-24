@@ -1,0 +1,66 @@
+name: Schemas
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+      - 'config/crd/**'
+      - 'config/samples/**'
+      - 'hack/openapi2jsonschema.py'
+      - 'hack/generate-schemas.sh'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+      - 'config/crd/**'
+      - 'config/samples/**'
+      - 'hack/openapi2jsonschema.py'
+      - 'hack/generate-schemas.sh'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-schemas:
+    name: Generate & Validate Schemas
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Generate JSON schemas
+        run: make schemas
+
+      - name: Check for schema changes
+        run: |
+          if [[ -n "$(git status --porcelain schemas/)" ]]; then
+            echo "::error::JSON schemas are out of date. Run 'make schemas' and commit the changes."
+            git diff schemas/
+            exit 1
+          fi
+
+      - name: Install kubeconform
+        uses: jaxxstorm/action-install-gh-release@v1
+        with:
+          repo: yannh/kubeconform
+          tag: v0.6.7
+
+      - name: Validate sample manifests
+        run: |
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'schemas/{{.ResourceKind}}_v1alpha1.json' \
+            -ignore-filename-pattern 'kustomization.yaml' \
+            config/samples/*.yaml

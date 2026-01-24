@@ -111,6 +111,19 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 		echo "CRDs synced to Helm chart"; \
 	fi
 
+.PHONY: schemas
+schemas: ## Generate JSON schemas from CRDs for editor validation
+	@hack/generate-schemas.sh
+
+.PHONY: validate-manifests
+validate-manifests: schemas ## Validate sample manifests against JSON schemas (requires kubeconform)
+	@command -v kubeconform >/dev/null 2>&1 || { echo "kubeconform not found. Install with: brew install kubeconform"; exit 1; }
+	kubeconform -strict -summary \
+		-schema-location default \
+		-schema-location 'schemas/{{.ResourceKind}}_v1alpha1.json' \
+		-ignore-filename-pattern 'kustomization.yaml' \
+		config/samples/*.yaml
+
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
