@@ -30,25 +30,25 @@ spec:
       read: true
       write: true
 ---
-# Admin key example
+# Key with bucket creation permission
 apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageKey
 metadata:
-  name: admin-key
+  name: bucket-creator-key
   namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
 
-  name: "Admin Key"
+  name: "Bucket Creator Key"
 
   secretTemplate:
-    name: admin-s3-credentials
+    name: bucket-creator-credentials
 
-  # Grant admin permissions
-  adminScope:
+  # Grant S3 CreateBucket permission (allows creating buckets via S3 API)
+  # Note: For Admin API access, use GarageAdminToken instead
+  permissions:
     createBucket: true
-    readClusterInfo: true
 ---
 # Import existing key example
 apiVersion: garage.rajsingh.info/v1alpha1

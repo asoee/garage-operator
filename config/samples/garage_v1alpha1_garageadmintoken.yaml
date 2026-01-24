@@ -1,5 +1,7 @@
 ---
-# Full admin token with no restrictions
+# Admin token with no expiration
+# Note: The operator uses file-based admin tokens which always have full access.
+# For scoped/restricted tokens, use Garage's Admin API directly (CreateAdminToken).
 apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageAdminToken
 metadata:
@@ -15,67 +17,18 @@ spec:
     tokenKey: admin-token
     includeEndpoint: true
 ---
-# Read-only admin token for monitoring
+# Admin token with expiration date
 apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageAdminToken
 metadata:
-  name: admin-readonly
+  name: admin-expiring
   namespace: garage-operator-system
 spec:
   clusterRef:
     name: garage
-  name: Read-Only Monitoring Token
+  name: Expiring Admin Token
   expiration: "2027-12-31T23:59:59Z"
-  scope:
-    readOnly: true
   secretTemplate:
-    name: garage-admin-readonly
----
-# Scoped token for bucket management only
-apiVersion: garage.rajsingh.info/v1alpha1
-kind: GarageAdminToken
-metadata:
-  name: admin-bucket-manager
-  namespace: garage-operator-system
-spec:
-  clusterRef:
-    name: garage
-  name: Bucket Manager Token
-  scope:
-    allowedOperations:
-      - ListBuckets
-      - GetBucketInfo
-      - CreateBucket
-      - UpdateBucket
-      - DeleteBucket
-      - ListKeys
-      - GetKeyInfo
-      - AllowBucketKey
-      - DenyBucketKey
-    deniedOperations:
-      - UpdateClusterLayout
-      - ApplyClusterLayout
-  secretTemplate:
-    name: garage-bucket-manager-token
----
-# Scoped token for specific buckets only
-apiVersion: garage.rajsingh.info/v1alpha1
-kind: GarageAdminToken
-metadata:
-  name: admin-team-buckets
-  namespace: garage-operator-system
-spec:
-  clusterRef:
-    name: garage
-  name: Team Bucket Admin
-  scope:
-    bucketScope:
-      - team-data
-      - team-backups
-    allowedOperations:
-      - GetBucketInfo
-      - UpdateBucket
-      - AllowBucketKey
-      - DenyBucketKey
-  secretTemplate:
-    name: garage-team-admin-token
+    name: garage-admin-expiring
+    tokenKey: admin-token
+    endpointKey: admin-endpoint

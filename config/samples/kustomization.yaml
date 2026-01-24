@@ -4,4 +4,5 @@ resources:
 - garage_v1alpha1_garagebucket.yaml
 - garage_v1alpha1_garagekey.yaml
 - garage_v1alpha1_garagenode.yaml
+- garage_v1alpha1_garageadmintoken.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

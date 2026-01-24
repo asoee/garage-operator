@@ -448,10 +448,6 @@ type NetworkConfig struct {
 	// Service configures the Kubernetes Service for the cluster
 	// +optional
 	Service *ServiceConfig `json:"service,omitempty"`
-
-	// Ingress configures Ingress for the S3 API
-	// +optional
-	Ingress *IngressConfig `json:"ingress,omitempty"`
 }
 
 // ServiceConfig configures Kubernetes Service
@@ -477,65 +473,6 @@ type ServiceConfig struct {
 	// ExternalTrafficPolicy for LoadBalancer/NodePort
 	// +optional
 	ExternalTrafficPolicy corev1.ServiceExternalTrafficPolicy `json:"externalTrafficPolicy,omitempty"`
-}
-
-// IngressConfig configures Kubernetes Ingress
-type IngressConfig struct {
-	// Enabled enables ingress creation
-	// +optional
-	Enabled bool `json:"enabled,omitempty"`
-
-	// IngressClassName specifies the ingress class
-	// +optional
-	IngressClassName *string `json:"ingressClassName,omitempty"`
-
-	// Annotations for the ingress
-	// +optional
-	Annotations map[string]string `json:"annotations,omitempty"`
-
-	// Hosts for the ingress
-	// +optional
-	Hosts []IngressHost `json:"hosts,omitempty"`
-
-	// TLS configuration
-	// +optional
-	TLS []IngressTLS `json:"tls,omitempty"`
-}
-
-// IngressHost configures a host for ingress
-type IngressHost struct {
-	// Host is the FQDN
-	// +required
-	Host string `json:"host"`
-
-	// Paths for this host
-	// +optional
-	Paths []IngressPath `json:"paths,omitempty"`
-}
-
-// IngressPath configures a path for ingress
-type IngressPath struct {
-	// Path is the URL path
-	// +kubebuilder:default="/"
-	// +optional
-	Path string `json:"path,omitempty"`
-
-	// PathType specifies the path matching type
-	// +kubebuilder:validation:Enum=Exact;Prefix;ImplementationSpecific
-	// +kubebuilder:default="Prefix"
-	// +optional
-	PathType string `json:"pathType,omitempty"`
-}
-
-// IngressTLS configures TLS for ingress
-type IngressTLS struct {
-	// Hosts covered by this TLS certificate
-	// +optional
-	Hosts []string `json:"hosts,omitempty"`
-
-	// SecretName containing the TLS certificate
-	// +optional
-	SecretName string `json:"secretName,omitempty"`
 }
 
 // S3APIConfig configures the S3-compatible API
@@ -819,13 +756,12 @@ type SecurityConfig struct {
 // Garage nodes for internal replication and cluster coordination.
 //
 // For TLS on the S3/Admin APIs, use one of these approaches:
-// - Kubernetes Ingress with TLS termination (recommended)
 // - Service mesh (Istio, Linkerd) with mTLS
 // - External load balancer with TLS termination
 // - Sidecar proxy (nginx, envoy) in the pod
 type TLSConfig struct {
 	// Enabled enables TLS for inter-node RPC communication.
-	// NOTE: This does NOT enable TLS for S3/Admin APIs - use Ingress or service mesh for that.
+	// NOTE: This does NOT enable TLS for S3/Admin APIs - use a service mesh or load balancer for that.
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
 

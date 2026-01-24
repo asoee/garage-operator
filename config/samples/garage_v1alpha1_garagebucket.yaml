@@ -15,39 +15,16 @@ spec:
     maxSize: 10Gi
     maxObjects: 100000
 
-  # CORS configuration
-  cors:
-    - id: allow-all
-      allowedOrigins:
-        - "*"
-      allowedMethods:
-        - GET
-        - PUT
-        - POST
-        - DELETE
-        - HEAD
-      allowedHeaders:
-        - "*"
-      maxAgeSeconds: 3600
-
-  # Lifecycle rules
-  lifecycle:
-    - id: cleanup-temp
-      enabled: true
-      filter:
-        prefix: "temp/"
-      expiration:
-        days: 7
-    - id: abort-incomplete-uploads
-      enabled: true
-      abortIncompleteMultipartUpload:
-        daysAfterInitiation: 1
-
   # Key permissions
   keyPermissions:
     - keyRef: app-key
       read: true
       write: true
+
+  # Note: CORS and Lifecycle rules are NOT supported via the Garage Admin API.
+  # Configure these using the S3 API directly:
+  # - CORS: Use PutBucketCors S3 API
+  # - Lifecycle: Use PutBucketLifecycleConfiguration S3 API
 ---
 # Website bucket example
 apiVersion: garage.rajsingh.info/v1alpha1

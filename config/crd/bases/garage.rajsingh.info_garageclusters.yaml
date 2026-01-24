@@ -1594,68 +1594,6 @@ spec:
                     items:
                       type: string
                     type: array
-                  ingress:
-                    description: Ingress configures Ingress for the S3 API
-                    properties:
-                      annotations:
-                        additionalProperties:
-                          type: string
-                        description: Annotations for the ingress
-                        type: object
-                      enabled:
-                        description: Enabled enables ingress creation
-                        type: boolean
-                      hosts:
-                        description: Hosts for the ingress
-                        items:
-                          description: IngressHost configures a host for ingress
-                          properties:
-                            host:
-                              description: Host is the FQDN
-                              type: string
-                            paths:
-                              description: Paths for this host
-                              items:
-                                description: IngressPath configures a path for ingress
-                                properties:
-                                  path:
-                                    default: /
-                                    description: Path is the URL path
-                                    type: string
-                                  pathType:
-                                    default: Prefix
-                                    description: PathType specifies the path matching
-                                      type
-                                    enum:
-                                    - Exact
-                                    - Prefix
-                                    - ImplementationSpecific
-                                    type: string
-                                type: object
-                              type: array
-                          required:
-                          - host
-                          type: object
-                        type: array
-                      ingressClassName:
-                        description: IngressClassName specifies the ingress class
-                        type: string
-                      tls:
-                        description: TLS configuration
-                        items:
-                          description: IngressTLS configures TLS for ingress
-                          properties:
-                            hosts:
-                              description: Hosts covered by this TLS certificate
-                              items:
-                                type: string
-                              type: array
-                            secretName:
-                              description: SecretName containing the TLS certificate
-                              type: string
-                          type: object
-                        type: array
-                    type: object
                   rpcBindOutgoing:
                     description: RPCBindOutgoing pre-binds outgoing sockets to same
                       IP
@@ -2129,7 +2067,7 @@ spec:
                       enabled:
                         description: |-
                           Enabled enables TLS for inter-node RPC communication.
-                          NOTE: This does NOT enable TLS for S3/Admin APIs - use Ingress or service mesh for that.
+                          NOTE: This does NOT enable TLS for S3/Admin APIs - use a service mesh or load balancer for that.
                         type: boolean
                       keySecretRef:
                         description: KeySecretRef references a secret containing the
