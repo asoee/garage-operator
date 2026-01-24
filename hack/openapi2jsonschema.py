@@ -138,7 +138,7 @@ def process_crd_file(crd_file, output_dir, filename_format):
                     if schema:
                         filename = (
                             filename_format.format(
-                                kind=kind,
+                                kind=kind.lower(),
                                 group=group.split(".")[0],
                                 fullgroup=group,
                                 version=version["name"],
@@ -154,7 +154,7 @@ def process_crd_file(crd_file, output_dir, filename_format):
             ):
                 filename = (
                     filename_format.format(
-                        kind=kind,
+                        kind=kind.lower(),
                         group=group.split(".")[0],
                         fullgroup=group,
                         version=y["spec"]["version"],

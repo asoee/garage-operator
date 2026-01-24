@@ -9,7 +9,7 @@ These JSON schemas enable editor validation and autocompletion for Garage Operat
 Add a schema comment at the top of your manifest:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/GarageCluster_v1alpha1.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/garagecluster_v1alpha1.json
 apiVersion: garage.rajsingh.info/v1alpha1
 kind: GarageCluster
 metadata:
@@ -22,11 +22,11 @@ spec:
 
 | CRD | Schema URL |
 |-----|------------|
-| GarageCluster | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/GarageCluster_v1alpha1.json` |
-| GarageBucket | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/GarageBucket_v1alpha1.json` |
-| GarageKey | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/GarageKey_v1alpha1.json` |
-| GarageNode | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/GarageNode_v1alpha1.json` |
-| GarageAdminToken | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/GarageAdminToken_v1alpha1.json` |
+| GarageCluster | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/garagecluster_v1alpha1.json` |
+| GarageBucket | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/garagebucket_v1alpha1.json` |
+| GarageKey | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/garagekey_v1alpha1.json` |
+| GarageNode | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/garagenode_v1alpha1.json` |
+| GarageAdminToken | `https://raw.githubusercontent.com/rajsinghtech/garage-operator/main/schemas/garageadmintoken_v1alpha1.json` |
 
 ### kubeconform Validation
 

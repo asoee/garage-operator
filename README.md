@@ -98,6 +98,51 @@ kubectl get secret my-key -o jsonpath='{.data.secret-access-key}' | base64 -d &&
 kubectl get secret my-key -o jsonpath='{.data.endpoint}' | base64 -d && echo
 ```
 
+## Gateway Clusters
+
+Gateway clusters handle S3 API requests without storing data. They connect to a storage cluster and scale independently, ideal for edge deployments or handling high request volumes.
+
+```yaml
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageCluster
+metadata:
+  name: garage-gateway
+spec:
+  replicas: 5
+  gateway: true
+  connectTo:
+    clusterRef:
+      name: garage  # Reference to storage cluster
+  replication:
+    factor: 3       # Must match storage cluster
+  admin:
+    enabled: true
+    adminTokenSecretRef:
+      name: garage-admin-token
+      key: admin-token
+  s3Api:
+    enabled: true
+```
+
+Key differences from storage clusters:
+- Creates a **Deployment** instead of StatefulSet (no PVCs needed)
+- Registers pods as **gateway nodes** in the layout (capacity=null)
+- Requires `connectTo` to reference a storage cluster
+- Lightweight and horizontally scalable
+
+For cross-namespace or external storage clusters, use `rpcSecretRef` and `adminApiEndpoint`:
+
+```yaml
+connectTo:
+  rpcSecretRef:
+    name: garage-rpc-secret
+    key: rpc-secret
+  adminApiEndpoint: "http://garage.storage-namespace.svc.cluster.local:3903"
+  adminTokenSecretRef:
+    name: storage-admin-token
+    key: admin-token
+```
+
 ## COSI Support (Optional)
 
 The operator includes an optional COSI (Container Object Storage Interface) driver that provides Kubernetes-native object storage provisioning.
