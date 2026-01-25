@@ -48,7 +48,7 @@ import (
 
 const (
 	garageClusterFinalizer = "garagecluster.garage.rajsingh.info/finalizer"
-	defaultGarageImage     = "dxflrs/garage:v2.1.0"
+	defaultGarageImage     = "dxflrs/garage:v2.2.0"
 
 	// Health status constants
 	healthStatusHealthy  = "healthy"
@@ -366,6 +366,29 @@ func (r *GarageClusterReconciler) removeNodesFromLayout(ctx context.Context, clu
 	}
 
 	log.Info("Removed nodes from layout", "count", len(nodesToRemove), "version", newVersion)
+
+	// For gateway clusters, immediately skip dead nodes since gateways never store data.
+	// This prevents the removed gateway nodes from getting stuck in Draining state,
+	// which would cause quorum calculation to include unreachable nodes.
+	if cluster.Spec.Gateway {
+		skipReq := garage.SkipDeadNodesRequest{
+			Version:          newVersion,
+			AllowMissingData: true, // Safe for gateways - they never have data
+		}
+		result, err := garageClient.ClusterLayoutSkipDeadNodes(ctx, skipReq)
+		if err != nil {
+			// Don't fail finalization if skip fails - log and continue
+			// This can happen if there's only one layout version (nothing to skip)
+			if !garage.IsBadRequest(err) {
+				log.Error(err, "Failed to skip dead gateway nodes (will be cleaned up on next reconcile)")
+			}
+		} else {
+			log.Info("Skipped dead gateway nodes to prevent draining stall",
+				"ackUpdated", len(result.AckUpdated),
+				"syncUpdated", len(result.SyncUpdated))
+		}
+	}
+
 	return nil
 }
 
@@ -575,6 +598,9 @@ func writeBlockConfig(config *strings.Builder, cluster *garagev1alpha1.GarageClu
 	}
 	if cluster.Spec.Blocks.MaxConcurrentReads != nil {
 		fmt.Fprintf(config, "block_max_concurrent_reads = %d\n", *cluster.Spec.Blocks.MaxConcurrentReads)
+	}
+	if cluster.Spec.Blocks.MaxConcurrentWritesPerRequest != nil {
+		fmt.Fprintf(config, "block_max_concurrent_writes_per_request = %d\n", *cluster.Spec.Blocks.MaxConcurrentWritesPerRequest)
 	}
 	if cluster.Spec.Blocks.CompressionLevel != nil {
 		level := *cluster.Spec.Blocks.CompressionLevel
@@ -1660,6 +1686,36 @@ func (r *GarageClusterReconciler) updateStatusFromCluster(ctx context.Context, c
 			}
 			cluster.Status.LayoutVersion = status.LayoutVersion
 		}
+
+		// Fetch layout history to track draining versions
+		history, err := garageClient.GetClusterLayoutHistory(ctx)
+		if err != nil {
+			log.V(1).Info("Failed to get cluster layout history", "error", err)
+		} else {
+			cluster.Status.LayoutHistory = &garagev1alpha1.LayoutHistoryStatus{
+				CurrentVersion: history.CurrentVersion,
+				MinAck:         history.MinAck,
+			}
+			for _, v := range history.Versions {
+				cluster.Status.LayoutHistory.Versions = append(cluster.Status.LayoutHistory.Versions, garagev1alpha1.LayoutVersionInfo{
+					Version:      v.Version,
+					Status:       string(v.Status),
+					StorageNodes: v.StorageNodes,
+					GatewayNodes: v.GatewayNodes,
+				})
+			}
+
+			// Log warning if there are stuck draining versions (indicates potential quorum issues)
+			if drainingVersions := history.GetDrainingVersions(); len(drainingVersions) > 0 {
+				for _, dv := range drainingVersions {
+					log.Info("Layout version stuck in Draining state - may cause quorum issues",
+						"version", dv.Version,
+						"storageNodes", dv.StorageNodes,
+						"gatewayNodes", dv.GatewayNodes,
+						"hint", "use skip-dead-nodes annotation if nodes are permanently removed")
+				}
+			}
+		}
 	}
 
 	// Update phase based on readiness
@@ -2695,7 +2751,7 @@ func (r *GarageClusterReconciler) connectToRemoteCluster(
 	}
 
 	// Add remote nodes to local layout for data replication
-	if err := r.addRemoteNodesToLayout(ctx, cluster, localClient, remoteStatus, remote); err != nil {
+	if err := r.addRemoteNodesToLayout(ctx, cluster, localClient, remoteClient, remoteStatus, remote); err != nil {
 		log.Error(err, "Failed to add remote nodes to layout", "cluster", remote.Name)
 		// Don't return error - connection succeeded, layout update is best-effort
 		// Will retry on next reconciliation
@@ -2707,10 +2763,15 @@ func (r *GarageClusterReconciler) connectToRemoteCluster(
 // addRemoteNodesToLayout adds remote cluster nodes to the local cluster's layout.
 // This ensures remote nodes participate in data replication with proper zone assignment.
 // It also propagates the cluster's zone redundancy settings to ensure consistent layout parameters.
+//
+// The function handles the bootstrap race condition where remote nodes may not have committed
+// roles yet (their controller hasn't applied the layout). In this case, it checks the remote
+// cluster's staged role changes to find nodes that are about to be committed.
 func (r *GarageClusterReconciler) addRemoteNodesToLayout(
 	ctx context.Context,
 	cluster *garagev1alpha1.GarageCluster,
 	localClient *garage.Client,
+	remoteClient *garage.Client,
 	remoteStatus *garage.ClusterStatus,
 	remote garagev1alpha1.RemoteClusterConfig,
 ) error {
@@ -2722,7 +2783,7 @@ func (r *GarageClusterReconciler) addRemoteNodesToLayout(
 		return fmt.Errorf("failed to get cluster layout: %w", err)
 	}
 
-	// Build map of existing nodes (current + staged)
+	// Build map of existing nodes (current + staged) in local layout
 	existingNodes := make(map[string]bool)
 	for _, role := range layout.Roles {
 		existingNodes[role.ID] = true
@@ -2731,33 +2792,59 @@ func (r *GarageClusterReconciler) addRemoteNodesToLayout(
 		existingNodes[staged.ID] = true
 	}
 
+	// Get remote layout to check for staged role changes
+	// This helps during bootstrap when remote nodes haven't been committed yet
+	remoteLayout, err := remoteClient.GetClusterLayout(ctx)
+	if err != nil {
+		log.V(1).Info("Failed to get remote layout, will use committed roles only", "error", err)
+		remoteLayout = nil
+	}
+
+	// Build map of staged roles in remote cluster for quick lookup
+	remoteStagedRoles := make(map[string]*garage.NodeRoleChange)
+	if remoteLayout != nil {
+		for i := range remoteLayout.StagedRoleChanges {
+			staged := &remoteLayout.StagedRoleChanges[i]
+			if !staged.Remove {
+				remoteStagedRoles[staged.ID] = staged
+			}
+		}
+	}
+
 	// Build role changes for missing remote nodes
-	// Only add nodes that already have a committed role in the remote cluster.
-	// Nodes without a role should be added by their own cluster's controller,
-	// which knows the correct capacity (nil for gateways, PVC size for storage).
 	newRoles := make([]garage.NodeRoleChange, 0, len(remoteStatus.Nodes))
 	for _, node := range remoteStatus.Nodes {
 		if existingNodes[node.ID] {
-			continue // Already in layout
+			continue // Already in local layout
 		}
 
-		// Skip nodes that don't have a committed role yet.
-		// They should be added by their own cluster controller, not via federation.
-		if node.Role == nil {
-			log.V(1).Info("Skipping remote node without committed role", "nodeId", node.ID[:16]+"...", "hostname", node.Hostname)
+		var role garage.NodeRoleChange
+
+		if node.Role != nil {
+			// Node has a committed role - use it
+			role = garage.NodeRoleChange{
+				ID:       node.ID,
+				Zone:     remote.Zone,           // Use configured zone from CRD
+				Tags:     []string{remote.Name}, // Tag with cluster name
+				Capacity: node.Role.Capacity,    // nil = gateway, non-nil = storage
+			}
+		} else if stagedRole, ok := remoteStagedRoles[node.ID]; ok {
+			// Node doesn't have a committed role but IS in staged changes
+			// This handles the bootstrap race condition where remote controller
+			// has staged nodes but hasn't applied the layout yet
+			log.V(1).Info("Using staged role for remote node", "nodeId", node.ID[:16]+"...", "zone", remote.Zone)
+			role = garage.NodeRoleChange{
+				ID:       node.ID,
+				Zone:     remote.Zone,           // Use configured zone from CRD
+				Tags:     []string{remote.Name}, // Tag with cluster name
+				Capacity: stagedRole.Capacity,   // Use capacity from staged role
+			}
+		} else {
+			// Node has no committed or staged role - skip it
+			// It will be picked up on the next reconciliation after the remote
+			// controller stages/commits its local nodes
+			log.V(1).Info("Skipping remote node without committed or staged role", "nodeId", node.ID[:16]+"...")
 			continue
-		}
-
-		role := garage.NodeRoleChange{
-			ID:   node.ID,
-			Zone: remote.Zone,           // Use configured zone from CRD
-			Tags: []string{remote.Name}, // Tag with cluster name
-		}
-
-		// Copy capacity from node's current role
-		// nil capacity = gateway node (valid in Garage)
-		if node.Role.Capacity != nil {
-			role.Capacity = node.Role.Capacity
 		}
 
 		newRoles = append(newRoles, role)
@@ -2814,6 +2901,111 @@ func (r *GarageClusterReconciler) addRemoteNodesToLayout(
 	}
 
 	log.Info("Applied federated layout", "cluster", remote.Name, "version", newVersion, "nodesAdded", len(newRoles))
+
+	// After adding nodes, check for stale remote nodes that were removed from the remote cluster
+	if err := r.removeStaleRemoteNodes(ctx, localClient, layout, remoteStatus, remote); err != nil {
+		// Don't fail the reconcile for stale node cleanup - just log
+		log.Error(err, "Failed to remove stale remote nodes", "cluster", remote.Name)
+	}
+
+	return nil
+}
+
+// removeStaleRemoteNodes detects and removes nodes from the local layout that were
+// previously added from a remote cluster but no longer exist in that remote cluster.
+// This prevents orphaned remote nodes from causing stuck Draining layout versions.
+func (r *GarageClusterReconciler) removeStaleRemoteNodes(
+	ctx context.Context,
+	localClient *garage.Client,
+	layout *garage.ClusterLayout,
+	remoteStatus *garage.ClusterStatus,
+	remote garagev1alpha1.RemoteClusterConfig,
+) error {
+	log := logf.FromContext(ctx)
+
+	// Build set of node IDs that exist in remote cluster
+	remoteNodeIDs := make(map[string]bool)
+	for _, node := range remoteStatus.Nodes {
+		remoteNodeIDs[node.ID] = true
+	}
+
+	// Find nodes in local layout that are tagged with remote cluster name but don't exist in remote
+	var staleNodes []garage.NodeRoleChange
+	for _, role := range layout.Roles {
+		// Check if this node is tagged as belonging to the remote cluster
+		isFromRemote := false
+		for _, tag := range role.Tags {
+			if tag == remote.Name {
+				isFromRemote = true
+				break
+			}
+		}
+
+		if isFromRemote && !remoteNodeIDs[role.ID] {
+			shortID := role.ID
+			if len(shortID) > 16 {
+				shortID = shortID[:16] + "..."
+			}
+			log.Info("Found stale remote node in layout (no longer exists in remote cluster)",
+				"nodeID", shortID, "remoteCluster", remote.Name, "zone", role.Zone)
+			staleNodes = append(staleNodes, garage.NodeRoleChange{
+				ID:     role.ID,
+				Remove: true,
+			})
+		}
+	}
+
+	if len(staleNodes) == 0 {
+		return nil
+	}
+
+	// Stage removal of stale nodes
+	if err := localClient.UpdateClusterLayout(ctx, staleNodes); err != nil {
+		return fmt.Errorf("failed to stage stale node removal: %w", err)
+	}
+
+	// Re-fetch layout to get current version
+	layout, err := localClient.GetClusterLayout(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get updated layout: %w", err)
+	}
+
+	// Apply layout
+	newVersion := layout.Version + 1
+	if err := localClient.ApplyClusterLayout(ctx, newVersion); err != nil {
+		if garage.IsConflict(err) {
+			log.Info("Layout version conflict during stale node removal, will retry", "version", newVersion)
+			return nil
+		}
+		if garage.IsReplicationConstraint(err) {
+			log.Info("Cannot remove stale remote nodes: would violate replication constraints",
+				"staleCount", len(staleNodes))
+			return nil
+		}
+		return fmt.Errorf("failed to apply stale node removal: %w", err)
+	}
+
+	log.Info("Removed stale remote nodes from layout",
+		"count", len(staleNodes), "remoteCluster", remote.Name, "version", newVersion)
+
+	// After removing stale remote nodes, call skip-dead-nodes to prevent draining stalls.
+	// Remote nodes are typically unreachable after removal, so they can't acknowledge sync.
+	// Use allowMissingData=true since we've confirmed these nodes no longer exist in the remote cluster.
+	skipReq := garage.SkipDeadNodesRequest{
+		Version:          newVersion,
+		AllowMissingData: true, // Safe - nodes confirmed removed from remote cluster
+	}
+	result, err := localClient.ClusterLayoutSkipDeadNodes(ctx, skipReq)
+	if err != nil {
+		if !garage.IsBadRequest(err) {
+			log.Error(err, "Failed to skip dead remote nodes after removal")
+		}
+	} else if len(result.AckUpdated) > 0 || len(result.SyncUpdated) > 0 {
+		log.Info("Skipped dead remote nodes to prevent draining stall",
+			"ackUpdated", len(result.AckUpdated),
+			"syncUpdated", len(result.SyncUpdated))
+	}
+
 	return nil
 }
 
@@ -2908,6 +3100,22 @@ func (r *GarageClusterReconciler) handleOperationalAnnotations(ctx context.Conte
 		log.Info("Processed and removed connect-nodes annotation")
 	}
 
+	// Handle skip-dead-nodes annotation: marks dead nodes as synced to unblock draining versions
+	if _, ok := cluster.Annotations[garagev1alpha1.AnnotationSkipDeadNodes]; ok {
+		if err := r.handleSkipDeadNodes(ctx, cluster); err != nil {
+			return err
+		}
+
+		// Remove annotations after processing
+		delete(cluster.Annotations, garagev1alpha1.AnnotationSkipDeadNodes)
+		delete(cluster.Annotations, garagev1alpha1.AnnotationAllowMissingData)
+		if err := r.Update(ctx, cluster); err != nil {
+			log.Error(err, "Failed to remove skip-dead-nodes annotation")
+			return err
+		}
+		log.Info("Processed and removed skip-dead-nodes annotation")
+	}
+
 	return nil
 }
 
@@ -2965,6 +3173,57 @@ func (r *GarageClusterReconciler) handleConnectNodes(ctx context.Context, cluste
 			log.Info("Connection to external node failed", "nodeID", nodeID[:16]+"...", "addr", addr, "error", errMsg)
 		}
 	}
+
+	return nil
+}
+
+// handleSkipDeadNodes marks dead/removed nodes as synced to unblock draining layout versions.
+// This is called when the skip-dead-nodes annotation is set.
+// If allow-missing-data annotation is also set, it will force sync even if quorum is missing.
+func (r *GarageClusterReconciler) handleSkipDeadNodes(ctx context.Context, cluster *garagev1alpha1.GarageCluster) error {
+	log := logf.FromContext(ctx)
+
+	adminToken, err := r.getAdminToken(ctx, cluster)
+	if err != nil || adminToken == "" {
+		return fmt.Errorf("admin token required for skip-dead-nodes operation")
+	}
+
+	adminPort := getAdminPort(cluster)
+	adminEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", cluster.Name, cluster.Namespace, adminPort)
+	garageClient := garage.NewClient(adminEndpoint, adminToken)
+
+	// Get current layout to determine version
+	layout, err := garageClient.GetClusterLayout(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster layout: %w", err)
+	}
+
+	// Check if allow-missing-data annotation is set
+	allowMissingData := false
+	if val, ok := cluster.Annotations[garagev1alpha1.AnnotationAllowMissingData]; ok && val == "true" {
+		allowMissingData = true
+		log.Info("Allow-missing-data annotation is set, will force sync update")
+	}
+
+	req := garage.SkipDeadNodesRequest{
+		Version:          layout.Version,
+		AllowMissingData: allowMissingData,
+	}
+
+	result, err := garageClient.ClusterLayoutSkipDeadNodes(ctx, req)
+	if err != nil {
+		// If bad request, might be single layout version (nothing to skip)
+		if garage.IsBadRequest(err) {
+			log.Info("Skip-dead-nodes: no draining versions to process (single layout version)")
+			return nil
+		}
+		return fmt.Errorf("failed to skip dead nodes: %w", err)
+	}
+
+	log.Info("Skip-dead-nodes completed",
+		"ackUpdated", len(result.AckUpdated),
+		"syncUpdated", len(result.SyncUpdated),
+		"version", layout.Version)
 
 	return nil
 }

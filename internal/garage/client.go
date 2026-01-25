@@ -433,6 +433,107 @@ func (c *Client) RevertClusterLayout(ctx context.Context) error {
 	return err
 }
 
+// SkipDeadNodesRequest is the request to skip dead nodes in draining layout versions
+type SkipDeadNodesRequest struct {
+	// Version is the layout version to assume is up-to-date (usually current version)
+	Version int64 `json:"version"`
+	// AllowMissingData allows skipping even if quorum is missing (may cause data loss)
+	AllowMissingData bool `json:"allowMissingData"`
+}
+
+// SkipDeadNodesResponse is the response from ClusterLayoutSkipDeadNodes
+type SkipDeadNodesResponse struct {
+	// AckUpdated contains node IDs whose ACK tracker was updated
+	AckUpdated []string `json:"ackUpdated"`
+	// SyncUpdated contains node IDs whose SYNC tracker was updated (only if AllowMissingData)
+	SyncUpdated []string `json:"syncUpdated"`
+}
+
+// ClusterLayoutSkipDeadNodes marks dead/removed nodes as synced to unblock draining layout versions.
+// This is useful when nodes are permanently removed and will never acknowledge syncing.
+// Use allowMissingData=true for gateway nodes that never stored data.
+func (c *Client) ClusterLayoutSkipDeadNodes(ctx context.Context, req SkipDeadNodesRequest) (*SkipDeadNodesResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/v2/ClusterLayoutSkipDeadNodes", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var result SkipDeadNodesResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// LayoutVersionStatus represents the status of a layout version
+type LayoutVersionStatus string
+
+const (
+	LayoutVersionStatusCurrent    LayoutVersionStatus = "Current"
+	LayoutVersionStatusDraining   LayoutVersionStatus = "Draining"
+	LayoutVersionStatusHistorical LayoutVersionStatus = "Historical"
+)
+
+// LayoutVersion represents a version in the layout history
+type LayoutVersion struct {
+	Version      int64               `json:"version"`
+	Status       LayoutVersionStatus `json:"status"`
+	StorageNodes int                 `json:"storageNodes"`
+	GatewayNodes int                 `json:"gatewayNodes"`
+}
+
+// NodeUpdateTrackers contains the update tracker values for a node
+type NodeUpdateTrackers struct {
+	Ack     int64 `json:"ack"`
+	Sync    int64 `json:"sync"`
+	SyncAck int64 `json:"syncAck"`
+}
+
+// LayoutHistoryResponse is the response from GetClusterLayoutHistory
+type LayoutHistoryResponse struct {
+	CurrentVersion int64                         `json:"currentVersion"`
+	MinAck         int64                         `json:"minAck"`
+	Versions       []LayoutVersion               `json:"versions"`
+	UpdateTrackers map[string]NodeUpdateTrackers `json:"updateTrackers,omitempty"`
+}
+
+// GetClusterLayoutHistory returns the layout version history including draining status
+func (c *Client) GetClusterLayoutHistory(ctx context.Context) (*LayoutHistoryResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/v2/GetClusterLayoutHistory", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var history LayoutHistoryResponse
+	if err := json.Unmarshal(resp, &history); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &history, nil
+}
+
+// HasDrainingVersions returns true if there are any layout versions in Draining status
+func (h *LayoutHistoryResponse) HasDrainingVersions() bool {
+	for _, v := range h.Versions {
+		if v.Status == LayoutVersionStatusDraining {
+			return true
+		}
+	}
+	return false
+}
+
+// GetDrainingVersions returns all layout versions currently in Draining status
+func (h *LayoutHistoryResponse) GetDrainingVersions() []LayoutVersion {
+	var draining []LayoutVersion
+	for _, v := range h.Versions {
+		if v.Status == LayoutVersionStatusDraining {
+			draining = append(draining, v)
+		}
+	}
+	return draining
+}
+
 // Bucket represents a Garage bucket
 // Matches Garage's GetBucketInfoResponse
 // Note: Local aliases are embedded in each BucketKeyInfo.BucketLocalAliases, not at the top level
