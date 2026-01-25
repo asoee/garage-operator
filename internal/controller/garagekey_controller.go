@@ -180,8 +180,8 @@ func (r *GarageKeyReconciler) reconcileKey(ctx context.Context, key *garagev1alp
 func (r *GarageKeyReconciler) getOrCreateKey(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, keyName string) (*garage.Key, string, error) {
 	log := logf.FromContext(ctx)
 
+	// If we already have an AccessKeyID in status, try to fetch that key
 	if key.Status.AccessKeyID != "" {
-		// Use ShowSecretKey to retrieve the secret for validation/sync with K8s secret
 		existing, err := garageClient.GetKey(ctx, garage.GetKeyRequest{
 			ID:            key.Status.AccessKeyID,
 			ShowSecretKey: true,
@@ -190,14 +190,33 @@ func (r *GarageKeyReconciler) getOrCreateKey(ctx context.Context, key *garagev1a
 			if err := r.updateKeyIfNeeded(ctx, key, garageClient, existing); err != nil {
 				return nil, "", err
 			}
-			// Warn if secret wasn't returned despite requesting it (unexpected Garage behavior)
 			if existing.SecretAccessKey == "" {
 				log.V(1).Info("Garage did not return secret key despite showSecretKey=true, preserving existing K8s secret",
 					"accessKeyId", existing.AccessKeyID)
 			}
-			// Return the secret key so reconcileSecret can validate/update the K8s secret
 			return existing, existing.SecretAccessKey, nil
 		}
+		// If key was not found (404), it was deleted externally - we can recreate it
+		// For any other error (network, timeout, etc.), return the error to retry later
+		// This prevents creating duplicate keys on transient failures
+		if !garage.IsNotFound(err) {
+			return nil, "", fmt.Errorf("failed to get existing key %s: %w", key.Status.AccessKeyID, err)
+		}
+		log.Info("Key not found in Garage, will search by name or create new", "accessKeyId", key.Status.AccessKeyID)
+	}
+
+	// Search for existing key by name to support multi-cluster federation
+	// This prevents duplicate keys when multiple operators manage the same Garage cluster
+	existingKey, err := r.findKeyByName(ctx, garageClient, keyName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to search for existing key by name: %w", err)
+	}
+	if existingKey != nil {
+		log.Info("Found existing key by name, adopting it", "name", keyName, "accessKeyId", existingKey.AccessKeyID)
+		if err := r.updateKeyIfNeeded(ctx, key, garageClient, existingKey); err != nil {
+			return nil, "", err
+		}
+		return existingKey, existingKey.SecretAccessKey, nil
 	}
 
 	if key.Spec.ImportKey != nil {
@@ -205,6 +224,42 @@ func (r *GarageKeyReconciler) getOrCreateKey(ctx context.Context, key *garagev1a
 	}
 
 	return r.createKey(ctx, key, garageClient, keyName)
+}
+
+// findKeyByName searches for an existing key with the given name
+// Returns nil if no matching key is found or if multiple keys match (ambiguous)
+func (r *GarageKeyReconciler) findKeyByName(ctx context.Context, garageClient *garage.Client, keyName string) (*garage.Key, error) {
+	log := logf.FromContext(ctx)
+
+	// List all keys and find exact name match
+	keys, err := garageClient.ListKeys(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list keys: %w", err)
+	}
+
+	var matches []garage.KeyListItem
+	for _, k := range keys {
+		if k.Name == keyName {
+			matches = append(matches, k)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
+	if len(matches) > 1 {
+		log.Info("Multiple keys found with same name, cannot adopt automatically",
+			"name", keyName, "count", len(matches))
+		// Return nil to trigger creation of a new key - user should clean up duplicates
+		return nil, nil
+	}
+
+	// Fetch full key info including secret
+	return garageClient.GetKey(ctx, garage.GetKeyRequest{
+		ID:            matches[0].ID,
+		ShowSecretKey: true,
+	})
 }
 
 func (r *GarageKeyReconciler) importKey(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, keyName string) (*garage.Key, string, error) {

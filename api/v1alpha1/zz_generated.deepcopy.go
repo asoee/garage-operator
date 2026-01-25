@@ -103,6 +103,11 @@ func (in *BlockConfig) DeepCopyInto(out *BlockConfig) {
 		*out = new(int)
 		**out = **in
 	}
+	if in.MaxConcurrentWritesPerRequest != nil {
+		in, out := &in.MaxConcurrentWritesPerRequest, &out.MaxConcurrentWritesPerRequest
+		*out = new(int)
+		**out = **in
+	}
 	if in.CompressionLevel != nil {
 		in, out := &in.CompressionLevel, &out.CompressionLevel
 		*out = new(string)

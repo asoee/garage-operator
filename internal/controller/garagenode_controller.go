@@ -507,6 +507,29 @@ func (r *GarageNodeReconciler) finalize(ctx context.Context, node *garagev1alpha
 	}
 
 	log.Info("Removed node from layout", "version", stagedVersion)
+
+	// For gateway nodes, immediately skip dead nodes since gateways never store data.
+	// This prevents the removed gateway node from getting stuck in Draining state.
+	// For storage nodes, we don't auto-skip as it could cause data loss - the operator
+	// will log warnings about stuck draining versions and users can use the skip-dead-nodes annotation.
+	if node.Spec.Gateway {
+		skipReq := garage.SkipDeadNodesRequest{
+			Version:          stagedVersion,
+			AllowMissingData: true, // Safe for gateways - they never have data
+		}
+		result, err := garageClient.ClusterLayoutSkipDeadNodes(ctx, skipReq)
+		if err != nil {
+			// Don't fail finalization if skip fails - will be cleaned up by cluster controller
+			if !garage.IsBadRequest(err) {
+				log.Error(err, "Failed to skip dead gateway node (will be cleaned up later)")
+			}
+		} else if len(result.AckUpdated) > 0 || len(result.SyncUpdated) > 0 {
+			log.Info("Skipped dead gateway node to prevent draining stall",
+				"ackUpdated", len(result.AckUpdated),
+				"syncUpdated", len(result.SyncUpdated))
+		}
+	}
+
 	return nil
 }
 

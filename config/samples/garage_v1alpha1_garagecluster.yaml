@@ -8,7 +8,7 @@ metadata:
   namespace: garage-operator-system
 spec:
   replicas: 3
-  image: dxflrs/garage:v2.1.0
+  image: dxflrs/garage:v2.2.0
 
   replication:
     factor: 3
@@ -54,7 +54,7 @@ metadata:
   namespace: garage-operator-system
 spec:
   replicas: 3
-  image: dxflrs/garage:v2.1.0
+  image: dxflrs/garage:v2.2.0
 
   # Zone for this cluster - used for fault tolerance
   zone: us-east-1

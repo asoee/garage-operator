@@ -25,7 +25,7 @@ import (
 // GarageClusterSpec defines the desired state of GarageCluster
 type GarageClusterSpec struct {
 	// Image specifies the Garage container image to use
-	// +kubebuilder:default="dxflrs/garage:v2.1.0"
+	// +kubebuilder:default="dxflrs/garage:v2.2.0"
 	// +optional
 	Image string `json:"image,omitempty"`
 
@@ -653,6 +653,14 @@ type BlockConfig struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	MaxConcurrentReads *int `json:"maxConcurrentReads,omitempty"`
+
+	// MaxConcurrentWritesPerRequest is the maximum parallel block writes per PUT request.
+	// Higher values improve throughput but increase memory usage.
+	// Default: 3. Recommended: 10-30 for NVMe, 3-10 for HDD.
+	// Added in Garage v2.2.0.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxConcurrentWritesPerRequest *int `json:"maxConcurrentWritesPerRequest,omitempty"`
 
 	// CompressionLevel is the zstd compression level
 	// 1-19: standard, 20-22: ultra, -1 to -99: fast, "none": disabled

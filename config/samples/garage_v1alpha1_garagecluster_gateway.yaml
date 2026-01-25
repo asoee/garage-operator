@@ -17,7 +17,7 @@ metadata:
   namespace: garage-operator-system
 spec:
   replicas: 2
-  image: dxflrs/garage:v2.1.0
+  image: dxflrs/garage:v2.2.0
 
   # Gateway mode - creates Deployment instead of StatefulSet, no PVCs
   gateway: true
@@ -63,7 +63,7 @@ metadata:
   namespace: edge-namespace
 spec:
   replicas: 3
-  image: dxflrs/garage:v2.1.0
+  image: dxflrs/garage:v2.2.0
 
   gateway: true
 
@@ -110,7 +110,7 @@ metadata:
   namespace: garage-operator-system
 spec:
   replicas: 2
-  image: dxflrs/garage:v2.1.0
+  image: dxflrs/garage:v2.2.0
 
   gateway: true
 

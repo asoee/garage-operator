@@ -1066,6 +1066,14 @@ spec:
                       file reads
                     minimum: 1
                     type: integer
+                  maxConcurrentWritesPerRequest:
+                    description: |-
+                      MaxConcurrentWritesPerRequest is the maximum parallel block writes per PUT request.
+                      Higher values improve throughput but increase memory usage.
+                      Default: 3. Recommended: 10-30 for NVMe, 3-10 for HDD.
+                      Added in Garage v2.2.0.
+                    minimum: 1
+                    type: integer
                   ramBufferMax:
                     anyOf:
                     - type: integer
@@ -1609,7 +1617,7 @@ spec:
                   - Must specify connectTo to reference a storage cluster
                 type: boolean
               image:
-                default: dxflrs/garage:v2.1.0
+                default: dxflrs/garage:v2.2.0
                 description: Image specifies the Garage container image to use
                 type: string
               imagePullPolicy:

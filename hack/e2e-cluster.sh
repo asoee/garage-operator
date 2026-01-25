@@ -1209,7 +1209,7 @@ metadata:
   namespace: $NAMESPACE
 spec:
   replicas: 1
-  image: dxflrs/garage:v2.1.0
+  image: dxflrs/garage:v2.2.0
   zone: test-zone
   replication:
     factor: 1
