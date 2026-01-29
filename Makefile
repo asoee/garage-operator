@@ -110,9 +110,10 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 		cp config/crd/bases/*.yaml $(HELM_CHART_DIR)/crds/ && \
 		echo "CRDs synced to Helm chart"; \
 	fi
+	@hack/generate-schemas.sh
 
 .PHONY: schemas
-schemas: ## Generate JSON schemas from CRDs for editor validation
+schemas: ## Generate JSON schemas from CRDs for editor validation (also runs as part of manifests)
 	@hack/generate-schemas.sh
 
 .PHONY: validate-manifests
