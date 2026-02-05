@@ -249,6 +249,30 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "GarageAdminToken")
 		os.Exit(1)
 	}
+
+	// Setup webhooks if webhook server is configured
+	if len(webhookCertPath) > 0 {
+		if err := (&garagev1alpha1.GarageCluster{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "GarageCluster")
+			os.Exit(1)
+		}
+		if err := (&garagev1alpha1.GarageBucket{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "GarageBucket")
+			os.Exit(1)
+		}
+		if err := (&garagev1alpha1.GarageKey{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "GarageKey")
+			os.Exit(1)
+		}
+		if err := (&garagev1alpha1.GarageNode{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "GarageNode")
+			os.Exit(1)
+		}
+		if err := (&garagev1alpha1.GarageAdminToken{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "GarageAdminToken")
+			os.Exit(1)
+		}
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

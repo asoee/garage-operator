@@ -50,6 +50,9 @@ spec:
         - --leader-elect
         {{- end }}
         - --health-probe-bind-address=:8081
+        {{- if .Values.webhooks.enabled }}
+        - --webhook-cert-path=/tmp/k8s-webhook-server/serving-certs
+        {{- end }}
         {{- if .Values.cosi.enabled }}
         - --enable-cosi
         - --cosi-endpoint=unix://{{ .Values.cosi.socketPath }}
