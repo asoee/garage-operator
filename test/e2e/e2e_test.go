@@ -294,6 +294,49 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
+		It("should accept GarageKey with allBuckets field", func() {
+			By("creating a GarageKey with allBuckets cluster-wide permissions")
+			keyYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: e2e-cluster-wide-key
+  namespace: %s
+spec:
+  clusterRef:
+    name: non-existent-cluster
+  allBuckets:
+    read: true
+    write: true
+`, namespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(keyYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create GarageKey with allBuckets")
+
+			By("verifying the key was created with allBuckets in spec")
+			cmd = exec.Command("kubectl", "get", "garagekey", "e2e-cluster-wide-key",
+				"-n", namespace, "-o", "jsonpath={.spec.allBuckets.read}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("true"), "allBuckets.read should be true")
+
+			By("verifying the key enters Error phase (cluster doesn't exist)")
+			verifyKeyError := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "e2e-cluster-wide-key",
+					"-n", namespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Error"), "Key should be in Error phase, got: %s", output)
+			}
+			Eventually(verifyKeyError, 1*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "garagekey", "e2e-cluster-wide-key",
+				"-n", namespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
 		It("should remain stable with no garage resources defined", func() {
 			By("checking if garage resources exist (from other tests)")
 			cmd := exec.Command("kubectl", "get", "garageclusters,garagebuckets,garagekeys,garagenodes", "-A", "--no-headers")
@@ -449,7 +492,11 @@ var _ = Describe("Gateway Cluster", Ordered, Label("gateway"), func() {
 
 	AfterAll(func() {
 		By("cleaning up test resources")
-		cmd := exec.Command("kubectl", "delete", "garagecluster", gatewayClusterName, "-n", testNamespace, "--ignore-not-found")
+		cmd := exec.Command("kubectl", "delete", "garagekey", "--all", "-n", testNamespace, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "garagebucket", "--all", "-n", testNamespace, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "garagecluster", gatewayClusterName, "-n", testNamespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 		cmd = exec.Command("kubectl", "delete", "garagecluster", storageClusterName, "-n", testNamespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
@@ -745,6 +792,250 @@ spec:
 
 			By("cleaning up test bucket")
 			cmd = exec.Command("kubectl", "delete", "garagebucket", "gateway-test-bucket",
+				"-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should grant cluster-wide key access to all buckets", func() {
+			By("creating a test bucket for cluster-wide key test")
+			bucketYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageBucket
+metadata:
+  name: cw-test-bucket
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+`, testNamespace, storageClusterName)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(bucketYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create test bucket")
+
+			By("waiting for bucket to be ready")
+			verifyBucketReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagebucket", "cw-test-bucket",
+					"-n", testNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Bucket not ready: phase=%s", output)
+			}
+			Eventually(verifyBucketReady, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("creating a cluster-wide key with allBuckets")
+			keyYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: cw-admin-key
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+  allBuckets:
+    read: true
+    write: true
+    owner: true
+`, testNamespace, storageClusterName)
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(keyYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create cluster-wide key")
+
+			By("waiting for key to be ready with ClusterWide=true")
+			verifyKeyReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "cw-admin-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Key not ready: phase=%s", output)
+			}
+			Eventually(verifyKeyReady, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying ClusterWide status is true")
+			cmd = exec.Command("kubectl", "get", "garagekey", "cw-admin-key",
+				"-n", testNamespace, "-o", "jsonpath={.status.clusterWide}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("true"), "ClusterWide should be true")
+
+			By("verifying key has access to the test bucket")
+			verifyBucketAccess := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "cw-admin-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.buckets}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				// The key should have at least one bucket in its access list
+				g.Expect(output).NotTo(BeEmpty(), "Key should have bucket access, got empty buckets list")
+			}
+			Eventually(verifyBucketAccess, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("cleaning up cluster-wide key and bucket")
+			cmd = exec.Command("kubectl", "delete", "garagekey", "cw-admin-key",
+				"-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "garagebucket", "cw-test-bucket",
+				"-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should revoke cluster-wide permissions when allBuckets is downgraded or removed", func() {
+			By("creating a test bucket for revocation test")
+			bucketYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageBucket
+metadata:
+  name: revoke-test-bucket
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+`, testNamespace, storageClusterName)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(bucketYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create test bucket")
+
+			By("waiting for bucket to be ready")
+			verifyBucketReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagebucket", "revoke-test-bucket",
+					"-n", testNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Bucket not ready: phase=%s", output)
+			}
+			Eventually(verifyBucketReady, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("creating a cluster-wide key with full permissions (read, write, owner)")
+			keyYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: revoke-test-key
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+  allBuckets:
+    read: true
+    write: true
+    owner: true
+`, testNamespace, storageClusterName)
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(keyYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create cluster-wide key")
+
+			By("waiting for key to be ready with full bucket access")
+			verifyFullAccess := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "revoke-test-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Key not ready: phase=%s", output)
+
+				// Verify owner permission is granted
+				cmd = exec.Command("kubectl", "get", "garagekey", "revoke-test-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.buckets[0].owner}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"), "Key should have owner access, got: %s", output)
+			}
+			Eventually(verifyFullAccess, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("downgrading allBuckets to read-only (write and owner should be revoked)")
+			downgradeYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: revoke-test-key
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+  allBuckets:
+    read: true
+`, testNamespace, storageClusterName)
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(downgradeYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to downgrade key permissions")
+
+			By("verifying write and owner permissions are revoked, read remains")
+			verifyDowngraded := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "revoke-test-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.buckets[0].read}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"), "read should still be true, got: %s", output)
+
+				// write=false is omitted by omitempty, so jsonpath returns ""
+				cmd = exec.Command("kubectl", "get", "garagekey", "revoke-test-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.buckets[0].write}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(SatisfyAny(Equal("false"), Equal("")),
+					"write should be revoked, got: %s", output)
+
+				cmd = exec.Command("kubectl", "get", "garagekey", "revoke-test-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.buckets[0].owner}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(SatisfyAny(Equal("false"), Equal("")),
+					"owner should be revoked, got: %s", output)
+			}
+			Eventually(verifyDowngraded, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("removing allBuckets entirely (all permissions should be revoked)")
+			removeYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: revoke-test-key
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+`, testNamespace, storageClusterName)
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(removeYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to remove allBuckets from key")
+
+			By("verifying all bucket permissions are revoked")
+			verifyRevoked := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "revoke-test-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.buckets}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(SatisfyAny(Equal("[]"), Equal("")),
+					"Key should have no bucket access after full revocation, got: %s", output)
+			}
+			Eventually(verifyRevoked, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying ClusterWide status is false after removal")
+			verifyNotClusterWide := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "revoke-test-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.clusterWide}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(SatisfyAny(Equal("false"), Equal("")),
+					"ClusterWide should be false after removal, got: %s", output)
+			}
+			Eventually(verifyNotClusterWide, 1*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("cleaning up revocation test resources")
+			cmd = exec.Command("kubectl", "delete", "garagekey", "revoke-test-key",
+				"-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "garagebucket", "revoke-test-bucket",
 				"-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
@@ -1425,7 +1716,11 @@ var _ = Describe("Manual Mode with GarageNodes", Ordered, Label("manual-mode"), 
 
 	AfterAll(func() {
 		By("cleaning up test resources")
-		cmd := exec.Command("kubectl", "delete", "garagenode", node1Name, "-n", testNamespace, "--ignore-not-found")
+		cmd := exec.Command("kubectl", "delete", "garagekey", "--all", "-n", testNamespace, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "garagebucket", "--all", "-n", testNamespace, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "garagenode", node1Name, "-n", testNamespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 		cmd = exec.Command("kubectl", "delete", "garagenode", node2Name, "-n", testNamespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
@@ -1753,6 +2048,90 @@ spec:
 
 			By("cleaning up test bucket")
 			cmd = exec.Command("kubectl", "delete", "garagebucket", "manual-test-bucket",
+				"-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should grant cluster-wide key access to buckets in manual mode", func() {
+			By("creating a bucket for cluster-wide key test")
+			bucketYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageBucket
+metadata:
+  name: manual-cw-bucket
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+`, testNamespace, clusterName)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(bucketYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create bucket")
+
+			By("waiting for bucket to be ready")
+			verifyBucketReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagebucket", "manual-cw-bucket",
+					"-n", testNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Bucket not ready: phase=%s", output)
+			}
+			Eventually(verifyBucketReady, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("creating a cluster-wide key")
+			keyYAML := fmt.Sprintf(`
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: manual-cw-key
+  namespace: %s
+spec:
+  clusterRef:
+    name: %s
+  allBuckets:
+    read: true
+    write: true
+`, testNamespace, clusterName)
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(keyYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create cluster-wide key")
+
+			By("waiting for key to be ready")
+			verifyKeyReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "manual-cw-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Key not ready: phase=%s", output)
+			}
+			Eventually(verifyKeyReady, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying ClusterWide status")
+			cmd = exec.Command("kubectl", "get", "garagekey", "manual-cw-key",
+				"-n", testNamespace, "-o", "jsonpath={.status.clusterWide}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("true"), "ClusterWide should be true")
+
+			By("verifying key has bucket access")
+			verifyBucketAccess := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "garagekey", "manual-cw-key",
+					"-n", testNamespace, "-o", "jsonpath={.status.buckets}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty(), "Key should have bucket access")
+			}
+			Eventually(verifyBucketAccess, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "garagekey", "manual-cw-key",
+				"-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "garagebucket", "manual-cw-bucket",
 				"-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})

@@ -55,6 +55,21 @@ type GarageKeySpec struct {
 	// +optional
 	BucketPermissions []BucketPermission `json:"bucketPermissions,omitempty"`
 
+	// AllBuckets grants this key access to ALL buckets in the cluster.
+	// Useful for admin tools, monitoring, or systems that need cluster-wide access.
+	// Uses deny-then-allow to enforce exact permissions: flags set false are actively
+	// revoked, not just ignored. Per-bucket permissions (bucketPermissions) run after
+	// and override additively on top.
+	//
+	// The key must be in the same namespace as the GarageBucket resources for
+	// bidirectional reconciliation (bucket controller also applies these permissions
+	// when new buckets are created).
+	//
+	// Note: ListBuckets returns ALL Garage buckets, including those not managed by
+	// the operator. Cluster-wide permissions will be applied to those buckets as well.
+	// +optional
+	AllBuckets *AllBucketsPermission `json:"allBuckets,omitempty"`
+
 	// Permissions configures key-level permissions
 	// Note: For admin API access, use admin tokens configured in GarageCluster
 	// +optional
@@ -185,6 +200,21 @@ type BucketPermission struct {
 	Owner bool `json:"owner,omitempty"`
 }
 
+// AllBucketsPermission grants access to all buckets in the cluster
+type AllBucketsPermission struct {
+	// Read allows reading objects from all buckets
+	// +optional
+	Read bool `json:"read,omitempty"`
+
+	// Write allows writing objects to all buckets
+	// +optional
+	Write bool `json:"write,omitempty"`
+
+	// Owner allows bucket owner operations on all buckets
+	// +optional
+	Owner bool `json:"owner,omitempty"`
+}
+
 // KeyPermissions configures key-level permissions in Garage
 // Note: Garage's Admin API uses separate admin tokens (configured in GarageCluster),
 // not S3 keys. This only controls S3-level permissions for the key.
@@ -219,6 +249,10 @@ type GarageKeyStatus struct {
 	// Expired indicates if this key has expired
 	// +optional
 	Expired bool `json:"expired,omitempty"`
+
+	// ClusterWide indicates this key has cluster-wide bucket access via allBuckets
+	// +optional
+	ClusterWide bool `json:"clusterWide,omitempty"`
 
 	// SecretRef references the created secret
 	// +optional
@@ -308,6 +342,7 @@ type KeyBucketAccess struct {
 // +kubebuilder:printcolumn:name="KeyID",type="string",JSONPath=".status.keyId"
 // +kubebuilder:printcolumn:name="AccessKeyID",type="string",JSONPath=".status.accessKeyId"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="ClusterWide",type="boolean",JSONPath=".status.clusterWide"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // GarageKey is the Schema for the garagekeys API

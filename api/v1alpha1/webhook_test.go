@@ -412,6 +412,91 @@ func containsHelper(s, substr string) bool {
 	return false
 }
 
+func TestGarageKey_ValidateAllBuckets(t *testing.T) {
+	tests := []struct {
+		name       string
+		allBuckets *AllBucketsPermission
+		wantErr    bool
+	}{
+		{
+			name:       "nil allBuckets is valid",
+			allBuckets: nil,
+			wantErr:    false,
+		},
+		{
+			name:       "read only is valid",
+			allBuckets: &AllBucketsPermission{Read: true},
+			wantErr:    false,
+		},
+		{
+			name:       "write only is valid",
+			allBuckets: &AllBucketsPermission{Write: true},
+			wantErr:    false,
+		},
+		{
+			name:       "owner only is valid",
+			allBuckets: &AllBucketsPermission{Owner: true},
+			wantErr:    false,
+		},
+		{
+			name:       "all permissions is valid",
+			allBuckets: &AllBucketsPermission{Read: true, Write: true, Owner: true},
+			wantErr:    false,
+		},
+		{
+			name:       "no permissions is invalid",
+			allBuckets: &AllBucketsPermission{},
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := &GarageKey{
+				Spec: GarageKeySpec{
+					ClusterRef: ClusterReference{Name: "test"},
+					AllBuckets: tt.allBuckets,
+				},
+			}
+			err := key.validateAllBuckets()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateAllBuckets() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGarageKey_ValidateWarningWithAllBuckets(t *testing.T) {
+	// When allBuckets is set, should NOT warn about no bucket permissions
+	key := &GarageKey{
+		Spec: GarageKeySpec{
+			ClusterRef: ClusterReference{Name: "test"},
+			AllBuckets: &AllBucketsPermission{Read: true},
+		},
+	}
+	warnings, err := key.validateGarageKey()
+	if err != nil {
+		t.Errorf("validateGarageKey() unexpected error = %v", err)
+	}
+	if len(warnings) > 0 {
+		t.Errorf("expected no warnings when allBuckets is set, got: %v", warnings)
+	}
+
+	// When neither allBuckets nor bucketPermissions is set, should warn
+	key2 := &GarageKey{
+		Spec: GarageKeySpec{
+			ClusterRef: ClusterReference{Name: "test"},
+		},
+	}
+	warnings2, err := key2.validateGarageKey()
+	if err != nil {
+		t.Errorf("validateGarageKey() unexpected error = %v", err)
+	}
+	if len(warnings2) == 0 {
+		t.Error("expected warning when no bucket permissions and no allBuckets")
+	}
+}
+
 func TestGarageBucket_ValidateKeyPermissions(t *testing.T) {
 	tests := []struct {
 		name        string

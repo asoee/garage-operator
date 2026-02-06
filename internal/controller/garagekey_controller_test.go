@@ -169,6 +169,106 @@ var _ = Describe("GarageKey Controller", func() {
 			Expect(createdKey.Spec.SecretTemplate.Name).To(Equal("custom-secret-name"))
 		})
 
+		It("should handle key with allBuckets cluster-wide permissions", func() {
+			By("Creating a GarageKey with allBuckets")
+			key := &garagev1alpha1.GarageKey{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: garagev1alpha1.GarageKeySpec{
+					ClusterRef: garagev1alpha1.ClusterReference{
+						Name: "test-cluster",
+					},
+					AllBuckets: &garagev1alpha1.AllBucketsPermission{
+						Read:  true,
+						Write: true,
+						Owner: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, key)).To(Succeed())
+
+			By("Verifying the key spec was stored correctly")
+			createdKey := &garagev1alpha1.GarageKey{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, createdKey)).To(Succeed())
+			Expect(createdKey.Spec.AllBuckets).NotTo(BeNil())
+			Expect(createdKey.Spec.AllBuckets.Read).To(BeTrue())
+			Expect(createdKey.Spec.AllBuckets.Write).To(BeTrue())
+			Expect(createdKey.Spec.AllBuckets.Owner).To(BeTrue())
+		})
+
+		It("should handle key with allBuckets removed (revocation tracking)", func() {
+			By("Creating a GarageKey with allBuckets set")
+			key := &garagev1alpha1.GarageKey{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: garagev1alpha1.GarageKeySpec{
+					ClusterRef: garagev1alpha1.ClusterReference{
+						Name: "test-cluster",
+					},
+					AllBuckets: &garagev1alpha1.AllBucketsPermission{
+						Read: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, key)).To(Succeed())
+
+			By("Verifying allBuckets is stored")
+			createdKey := &garagev1alpha1.GarageKey{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, createdKey)).To(Succeed())
+			Expect(createdKey.Spec.AllBuckets).NotTo(BeNil())
+
+			By("Simulating status.clusterWide being set by reconciler")
+			createdKey.Status.ClusterWide = true
+			Expect(k8sClient.Status().Update(ctx, createdKey)).To(Succeed())
+
+			By("Removing allBuckets from spec")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, createdKey)).To(Succeed())
+			createdKey.Spec.AllBuckets = nil
+			Expect(k8sClient.Update(ctx, createdKey)).To(Succeed())
+
+			By("Verifying allBuckets is nil but clusterWide status remains for revocation")
+			updatedKey := &garagev1alpha1.GarageKey{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, updatedKey)).To(Succeed())
+			Expect(updatedKey.Spec.AllBuckets).To(BeNil())
+			Expect(updatedKey.Status.ClusterWide).To(BeTrue())
+		})
+
+		It("should handle key with allBuckets and bucketPermissions", func() {
+			By("Creating a GarageKey with both allBuckets and bucketPermissions")
+			key := &garagev1alpha1.GarageKey{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: garagev1alpha1.GarageKeySpec{
+					ClusterRef: garagev1alpha1.ClusterReference{
+						Name: "test-cluster",
+					},
+					AllBuckets: &garagev1alpha1.AllBucketsPermission{
+						Read: true,
+					},
+					BucketPermissions: []garagev1alpha1.BucketPermission{
+						{
+							BucketRef: "special-bucket",
+							Owner:     true,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, key)).To(Succeed())
+
+			By("Verifying both are stored")
+			createdKey := &garagev1alpha1.GarageKey{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, createdKey)).To(Succeed())
+			Expect(createdKey.Spec.AllBuckets).NotTo(BeNil())
+			Expect(createdKey.Spec.AllBuckets.Read).To(BeTrue())
+			Expect(createdKey.Spec.BucketPermissions).To(HaveLen(1))
+		})
+
 		It("should handle key with expiration", func() {
 			By("Creating a GarageKey with expiration")
 			key := &garagev1alpha1.GarageKey{
