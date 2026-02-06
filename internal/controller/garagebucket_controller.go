@@ -400,19 +400,28 @@ func (r *GarageBucketReconciler) reconcileClusterWideKeys(ctx context.Context, b
 		return fmt.Errorf("failed to list keys for cluster-wide grants: %w", err)
 	}
 
+	// Resolve the bucket's effective cluster namespace
+	bucketClusterNs := bucket.Namespace
+	if bucket.Spec.ClusterRef.Namespace != "" {
+		bucketClusterNs = bucket.Spec.ClusterRef.Namespace
+	}
+
 	var permErrors []string
 	for i := range keyList.Items {
 		key := &keyList.Items[i]
 		if key.Spec.AllBuckets == nil {
 			continue
 		}
-		// Skip keys targeting a different cluster
-		keyCluster := key.Spec.ClusterRef.Name
-		bucketCluster := bucket.Spec.ClusterRef.Name
-		if keyCluster != bucketCluster {
+		// Skip keys targeting a different cluster (compare both name and resolved namespace)
+		keyClusterNs := key.Namespace
+		if key.Spec.ClusterRef.Namespace != "" {
+			keyClusterNs = key.Spec.ClusterRef.Namespace
+		}
+		if key.Spec.ClusterRef.Name != bucket.Spec.ClusterRef.Name || keyClusterNs != bucketClusterNs {
 			continue
 		}
 		if key.Status.AccessKeyID == "" {
+			log.V(1).Info("Skipping cluster-wide key with no AccessKeyID yet", "key", key.Name)
 			continue
 		}
 
