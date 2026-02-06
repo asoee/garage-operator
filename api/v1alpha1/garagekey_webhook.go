@@ -140,11 +140,16 @@ func (r *GarageKey) validateGarageKey() (admission.Warnings, error) {
 		return warnings, err
 	}
 
-	// Warn if no bucket permissions defined
-	if len(r.Spec.BucketPermissions) == 0 {
+	// Validate allBuckets
+	if err := r.validateAllBuckets(); err != nil {
+		return warnings, err
+	}
+
+	// Warn if no bucket permissions defined and allBuckets is not set
+	if len(r.Spec.BucketPermissions) == 0 && r.Spec.AllBuckets == nil {
 		warnings = append(warnings,
 			"No bucket permissions defined. The key will not have access to any buckets. "+
-				"You can grant access via GarageKey.bucketPermissions or GarageBucket.keyPermissions.")
+				"You can grant access via GarageKey.bucketPermissions, GarageKey.allBuckets, or GarageBucket.keyPermissions.")
 	}
 
 	return warnings, nil
@@ -182,6 +187,17 @@ func (r *GarageKey) validateImportKey() error {
 		}
 	}
 
+	return nil
+}
+
+// validateAllBuckets validates the allBuckets configuration.
+func (r *GarageKey) validateAllBuckets() error {
+	if r.Spec.AllBuckets == nil {
+		return nil
+	}
+	if !r.Spec.AllBuckets.Read && !r.Spec.AllBuckets.Write && !r.Spec.AllBuckets.Owner {
+		return fmt.Errorf("allBuckets: at least one permission (read, write, or owner) must be granted")
+	}
 	return nil
 }
 

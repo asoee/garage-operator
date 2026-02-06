@@ -73,3 +73,48 @@ spec:
   bucketPermissions:
     - globalAlias: shared-bucket
       read: true
+---
+# Cluster-wide admin key - gets access to ALL buckets
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: admin-key
+  namespace: garage-operator-system
+spec:
+  clusterRef:
+    name: garage
+
+  name: "Admin Key"
+
+  secretTemplate:
+    name: admin-s3-credentials
+
+  # Grant read/write/owner on every bucket in the cluster
+  allBuckets:
+    read: true
+    write: true
+    owner: true
+---
+# Cluster-wide read-only key with extra owner on one bucket
+apiVersion: garage.rajsingh.info/v1alpha1
+kind: GarageKey
+metadata:
+  name: monitoring-key
+  namespace: garage-operator-system
+spec:
+  clusterRef:
+    name: garage
+
+  name: "Monitoring Key"
+
+  secretTemplate:
+    name: monitoring-s3-credentials
+
+  # Read access on all buckets
+  allBuckets:
+    read: true
+
+  # Extra owner permission on metrics bucket
+  bucketPermissions:
+    - bucketRef: metrics-bucket
+      owner: true

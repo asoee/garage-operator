@@ -15,6 +15,25 @@
     "spec": {
       "description": "GarageKeySpec defines the desired state of GarageKey",
       "properties": {
+        "allBuckets": {
+          "description": "AllBuckets grants this key access to ALL buckets in the cluster.\nUseful for admin tools, monitoring, or systems that need cluster-wide access.\nComposes additively with bucketPermissions via AllowBucketKey OR semantics.",
+          "properties": {
+            "owner": {
+              "description": "Owner allows bucket owner operations on all buckets",
+              "type": "boolean"
+            },
+            "read": {
+              "description": "Read allows reading objects from all buckets",
+              "type": "boolean"
+            },
+            "write": {
+              "description": "Write allows writing objects to all buckets",
+              "type": "boolean"
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        },
         "bucketPermissions": {
           "description": "BucketPermissions grants this key access to buckets.\n\nNote: Permissions can be granted from either direction:\n- Here (GarageKey.bucketPermissions): Grant this key access to buckets\n- On GarageBucket (GarageBucket.keyPermissions): Grant keys access to the bucket\n\nBoth approaches are equivalent and result in the same Garage API calls.\nUse whichever is more convenient for your workflow:\n- Key-centric: Define all bucket access on the key\n- Bucket-centric: Define all key access on the bucket\n\nIf the same permission is defined in both places, they are merged (not conflicting).",
           "items": {
@@ -273,6 +292,10 @@
             "additionalProperties": false
           },
           "type": "array"
+        },
+        "clusterWide": {
+          "description": "ClusterWide indicates this key has cluster-wide bucket access via allBuckets",
+          "type": "boolean"
         },
         "conditions": {
           "description": "Conditions represent the current state",

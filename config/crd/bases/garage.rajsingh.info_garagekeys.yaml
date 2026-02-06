@@ -29,6 +29,9 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.clusterWide
+      name: ClusterWide
+      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -57,6 +60,22 @@ spec:
           spec:
             description: GarageKeySpec defines the desired state of GarageKey
             properties:
+              allBuckets:
+                description: |-
+                  AllBuckets grants this key access to ALL buckets in the cluster.
+                  Useful for admin tools, monitoring, or systems that need cluster-wide access.
+                  Composes additively with bucketPermissions via AllowBucketKey OR semantics.
+                properties:
+                  owner:
+                    description: Owner allows bucket owner operations on all buckets
+                    type: boolean
+                  read:
+                    description: Read allows reading objects from all buckets
+                    type: boolean
+                  write:
+                    description: Write allows writing objects to all buckets
+                    type: boolean
+                type: object
               bucketPermissions:
                 description: |-
                   BucketPermissions grants this key access to buckets.
@@ -294,6 +313,10 @@ spec:
                       type: boolean
                   type: object
                 type: array
+              clusterWide:
+                description: ClusterWide indicates this key has cluster-wide bucket
+                  access via allBuckets
+                type: boolean
               conditions:
                 description: Conditions represent the current state
                 items:

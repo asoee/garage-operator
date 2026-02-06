@@ -168,6 +168,10 @@ func (r *GarageBucketReconciler) reconcileBucket(ctx context.Context, bucket *ga
 		return err
 	}
 
+	if err := r.reconcileClusterWideKeys(ctx, bucket, garageClient, existingBucket.ID); err != nil {
+		return err
+	}
+
 	log.V(1).Info("Bucket reconciled successfully", "bucketID", existingBucket.ID)
 	return nil
 }
@@ -384,6 +388,51 @@ func (r *GarageBucketReconciler) reconcileLocalAliases(ctx context.Context, buck
 	}
 	if len(aliasErrors) > 0 {
 		return fmt.Errorf("failed to create local aliases: %v", aliasErrors)
+	}
+	return nil
+}
+
+func (r *GarageBucketReconciler) reconcileClusterWideKeys(ctx context.Context, bucket *garagev1alpha1.GarageBucket, garageClient *garage.Client, bucketID string) error {
+	log := logf.FromContext(ctx)
+
+	keyList := &garagev1alpha1.GarageKeyList{}
+	if err := r.List(ctx, keyList, client.InNamespace(bucket.Namespace)); err != nil {
+		return fmt.Errorf("failed to list keys for cluster-wide grants: %w", err)
+	}
+
+	var permErrors []string
+	for i := range keyList.Items {
+		key := &keyList.Items[i]
+		if key.Spec.AllBuckets == nil {
+			continue
+		}
+		// Skip keys targeting a different cluster
+		keyCluster := key.Spec.ClusterRef.Name
+		bucketCluster := bucket.Spec.ClusterRef.Name
+		if keyCluster != bucketCluster {
+			continue
+		}
+		if key.Status.AccessKeyID == "" {
+			continue
+		}
+
+		_, err := garageClient.AllowBucketKey(ctx, garage.AllowBucketKeyRequest{
+			BucketID:    bucketID,
+			AccessKeyID: key.Status.AccessKeyID,
+			Permissions: garage.BucketKeyPerms{
+				Read:  key.Spec.AllBuckets.Read,
+				Write: key.Spec.AllBuckets.Write,
+				Owner: key.Spec.AllBuckets.Owner,
+			},
+		})
+		if err != nil {
+			log.Error(err, "Failed to grant cluster-wide key access to bucket", "key", key.Name, "bucketId", bucketID)
+			permErrors = append(permErrors, fmt.Sprintf("%s: %v", key.Name, err))
+		}
+	}
+
+	if len(permErrors) > 0 {
+		return fmt.Errorf("failed to grant cluster-wide key access: %v", permErrors)
 	}
 	return nil
 }

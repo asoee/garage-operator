@@ -174,6 +174,10 @@ func (r *GarageKeyReconciler) reconcileKey(ctx context.Context, key *garagev1alp
 		return secretAccessKey, err
 	}
 
+	if err := r.reconcileAllBuckets(ctx, key, garageClient, garageKey.AccessKeyID); err != nil {
+		return secretAccessKey, err
+	}
+
 	return secretAccessKey, nil
 }
 
@@ -385,6 +389,46 @@ func (r *GarageKeyReconciler) reconcileBucketPermissions(ctx context.Context, ke
 	if len(permissionErrors) > 0 {
 		return fmt.Errorf("failed to set permissions for buckets: %v", permissionErrors)
 	}
+	return nil
+}
+
+func (r *GarageKeyReconciler) reconcileAllBuckets(ctx context.Context, key *garagev1alpha1.GarageKey, garageClient *garage.Client, accessKeyID string) error {
+	if key.Spec.AllBuckets == nil {
+		return nil
+	}
+
+	log := logf.FromContext(ctx)
+	log.V(1).Info("Reconciling cluster-wide bucket permissions", "accessKeyId", accessKeyID)
+
+	buckets, err := garageClient.ListBuckets(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list buckets for cluster-wide permissions: %w", err)
+	}
+
+	var permErrors []string
+	perms := garage.BucketKeyPerms{
+		Read:  key.Spec.AllBuckets.Read,
+		Write: key.Spec.AllBuckets.Write,
+		Owner: key.Spec.AllBuckets.Owner,
+	}
+
+	for _, b := range buckets {
+		_, err := garageClient.AllowBucketKey(ctx, garage.AllowBucketKeyRequest{
+			BucketID:    b.ID,
+			AccessKeyID: accessKeyID,
+			Permissions: perms,
+		})
+		if err != nil {
+			log.Error(err, "Failed to set cluster-wide permission on bucket", "bucketId", b.ID)
+			permErrors = append(permErrors, fmt.Sprintf("%s: %v", b.ID, err))
+		}
+	}
+
+	if len(permErrors) > 0 {
+		return fmt.Errorf("failed to set cluster-wide permissions for %d/%d buckets: %v", len(permErrors), len(buckets), permErrors)
+	}
+
+	log.V(1).Info("Cluster-wide permissions applied", "bucketCount", len(buckets))
 	return nil
 }
 
@@ -697,6 +741,7 @@ func (r *GarageKeyReconciler) updateStatusFromGarage(ctx context.Context, key *g
 		key.Status.Expiration = ""
 	}
 	key.Status.Expired = garageKey.Expired
+	key.Status.ClusterWide = key.Spec.AllBuckets != nil
 
 	// Update bucket access list
 	key.Status.Buckets = make([]garagev1alpha1.KeyBucketAccess, 0, len(garageKey.Buckets))
