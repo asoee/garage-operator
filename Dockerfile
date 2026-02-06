@@ -1,6 +1,6 @@
 # Build the manager binary
 # Use BUILDPLATFORM to compile natively (faster than QEMU emulation)
-FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.25 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
@@ -23,7 +23,7 @@ COPY . .
 # -ldflags injects version information at build time
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a \
     -ldflags "-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
-    -o manager cmd/main.go
+    -o manager ./cmd/main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Supports: linux/amd64, linux/arm64, linux/arm, linux/s390x, linux/ppc64le
