@@ -173,8 +173,34 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
+			By("getting the controller-manager pod name")
+			// Get the controller pod name if not already set (in case this test runs standalone)
+			if controllerPodName == "" {
+				verifyControllerUp := func(g Gomega) {
+					cmd := exec.Command("kubectl", "get",
+						"pods", "-l", "control-plane=controller-manager",
+						"-o", "go-template={{ range .items }}"+
+							"{{ if not .metadata.deletionTimestamp }}"+
+							"{{ .metadata.name }}"+
+							"{{ \"\\n\" }}{{ end }}{{ end }}",
+						"-n", namespace,
+					)
+					podOutput, err := utils.Run(cmd)
+					g.Expect(err).NotTo(HaveOccurred())
+					podNames := utils.GetNonEmptyLines(podOutput)
+					g.Expect(podNames).To(HaveLen(1), "expected 1 controller pod running")
+					controllerPodName = podNames[0]
+				}
+				Eventually(verifyControllerUp, 2*time.Minute, time.Second).Should(Succeed())
+			}
+
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
+			// Delete any existing binding first (may exist from previous test run)
+			cmd := exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName,
+				"--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			cmd = exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
 				"--clusterrole=garage-operator-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
@@ -216,13 +242,14 @@ var _ = Describe("Manager", Ordered, func() {
 			By("creating the curl-metrics pod to access the metrics endpoint")
 			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
 				"--namespace", namespace,
-				"--image=curlimages/curl:latest",
+				"--image=docker.io/curlimages/curl:latest",
 				"--overrides",
 				fmt.Sprintf(`{
 					"spec": {
 						"containers": [{
 							"name": "curl",
-							"image": "curlimages/curl:latest",
+							"image": "docker.io/curlimages/curl:latest",
+							"imagePullPolicy": "IfNotPresent",
 							"command": ["/bin/sh", "-c"],
 							"args": ["curl -v -k -H 'Authorization: Bearer %s' https://%s.%s.svc.cluster.local:8443/metrics"],
 							"securityContext": {
@@ -731,12 +758,13 @@ spec:
 					adminToken, storageClusterName, testNamespace)
 				cmd := exec.Command("kubectl", "run", "curl-layout-check", "--rm", "-i", "--restart=Never",
 					"-n", testNamespace,
-					"--image=curlimages/curl:latest",
+					"--image=docker.io/curlimages/curl:latest",
 					"--overrides", fmt.Sprintf(`{
 						"spec": {
 							"containers": [{
 								"name": "curl-layout-check",
-								"image": "curlimages/curl:latest",
+								"image": "docker.io/curlimages/curl:latest",
+								"imagePullPolicy": "IfNotPresent",
 								"command": ["/bin/sh", "-c"],
 								"args": [%q],
 								"securityContext": {
@@ -808,12 +836,13 @@ spec:
 					adminToken, storageClusterName, testNamespace)
 				cmd := exec.Command("kubectl", "run", "curl-get-node-id", "--rm", "-i", "--restart=Never",
 					"-n", testNamespace,
-					"--image=curlimages/curl:latest",
+					"--image=docker.io/curlimages/curl:latest",
 					"--overrides", fmt.Sprintf(`{
 						"spec": {
 							"containers": [{
 								"name": "curl-get-node-id",
-								"image": "curlimages/curl:latest",
+								"image": "docker.io/curlimages/curl:latest",
+								"imagePullPolicy": "IfNotPresent",
 								"command": ["/bin/sh", "-c"],
 								"args": [%q],
 								"securityContext": {
@@ -887,12 +916,13 @@ spec:
 					adminToken, storageClusterName, testNamespace)
 				cmd := exec.Command("kubectl", "run", "curl-check-node-id", "--rm", "-i", "--restart=Never",
 					"-n", testNamespace,
-					"--image=curlimages/curl:latest",
+					"--image=docker.io/curlimages/curl:latest",
 					"--overrides", fmt.Sprintf(`{
 						"spec": {
 							"containers": [{
 								"name": "curl-check-node-id",
-								"image": "curlimages/curl:latest",
+								"image": "docker.io/curlimages/curl:latest",
+								"imagePullPolicy": "IfNotPresent",
 								"command": ["/bin/sh", "-c"],
 								"args": [%q],
 								"securityContext": {
@@ -943,12 +973,13 @@ spec:
 					adminToken, storageClusterName, testNamespace)
 				cmd := exec.Command("kubectl", "run", "curl-health-final", "--rm", "-i", "--restart=Never",
 					"-n", testNamespace,
-					"--image=curlimages/curl:latest",
+					"--image=docker.io/curlimages/curl:latest",
 					"--overrides", fmt.Sprintf(`{
 						"spec": {
 							"containers": [{
 								"name": "curl-health-final",
-								"image": "curlimages/curl:latest",
+								"image": "docker.io/curlimages/curl:latest",
+								"imagePullPolicy": "IfNotPresent",
 								"command": ["/bin/sh", "-c"],
 								"args": [%q],
 								"securityContext": {
@@ -991,12 +1022,13 @@ spec:
 					adminToken, storageClusterName, testNamespace)
 				cmd := exec.Command("kubectl", "run", "curl-layout-roles", "--rm", "-i", "--restart=Never",
 					"-n", testNamespace,
-					"--image=curlimages/curl:latest",
+					"--image=docker.io/curlimages/curl:latest",
 					"--overrides", fmt.Sprintf(`{
 						"spec": {
 							"containers": [{
 								"name": "curl-layout-roles",
-								"image": "curlimages/curl:latest",
+								"image": "docker.io/curlimages/curl:latest",
+								"imagePullPolicy": "IfNotPresent",
 								"command": ["/bin/sh", "-c"],
 								"args": [%q],
 								"securityContext": {
@@ -1057,22 +1089,22 @@ spec:
 			By("verifying gateway node removed from storage cluster layout")
 			adminToken := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 			verifyGatewayRemoved := func(g Gomega) {
-				// Clean up any existing curl pod from previous retry attempts
+				// Force-delete any existing curl pod from previous retry attempts
 				cleanupCmd := exec.Command("kubectl", "delete", "pod", "curl-layout-cleanup",
-					"-n", testNamespace, "--ignore-not-found", "--wait=false")
+					"-n", testNamespace, "--ignore-not-found", "--force", "--grace-period=0")
 				_, _ = utils.Run(cleanupCmd)
-				time.Sleep(2 * time.Second) // Give time for pod to start terminating
 
 				curlCmd := fmt.Sprintf("curl -s -H 'Authorization: Bearer %s' http://%s.%s.svc.cluster.local:3903/v2/GetClusterLayout",
 					adminToken, storageClusterName, testNamespace)
 				cmd := exec.Command("kubectl", "run", "curl-layout-cleanup", "--rm", "-i", "--restart=Never",
 					"-n", testNamespace,
-					"--image=curlimages/curl:latest",
+					"--image=docker.io/curlimages/curl:latest",
 					"--overrides", fmt.Sprintf(`{
 						"spec": {
 							"containers": [{
 								"name": "curl-layout-cleanup",
-								"image": "curlimages/curl:latest",
+								"image": "docker.io/curlimages/curl:latest",
+								"imagePullPolicy": "IfNotPresent",
 								"command": ["/bin/sh", "-c"],
 								"args": [%q],
 								"securityContext": {
@@ -1431,12 +1463,13 @@ spec:
 				curlCmd := fmt.Sprintf("curl -s -H 'Authorization: Bearer %s' http://%s.%s.svc.cluster.local:3903/v2/GetClusterLayout",
 					adminToken, clusterName, testNamespace)
 				cmd := exec.Command("kubectl", "run", "curl-layout-zones", "--rm", "-i", "--restart=Never",
-					"-n", testNamespace, "--image=curlimages/curl:latest",
+					"-n", testNamespace, "--image=docker.io/curlimages/curl:latest",
 					fmt.Sprintf("--overrides=%s", fmt.Sprintf(`{
 						"spec": {
 							"containers": [{
 								"name": "curl-layout-zones",
-								"image": "curlimages/curl:latest",
+								"image": "docker.io/curlimages/curl:latest",
+								"imagePullPolicy": "IfNotPresent",
 								"command": ["/bin/sh", "-c"],
 								"args": [%q],
 								"securityContext": {
