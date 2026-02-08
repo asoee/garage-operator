@@ -84,6 +84,12 @@ type GarageNodeSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
+	// ImageRepository overrides just the repository portion of the Garage image.
+	// If not specified, inherits from GarageCluster.
+	// Ignored if image is set.
+	// +optional
+	ImageRepository string `json:"imageRepository,omitempty"`
+
 	// Resources overrides compute resources for the Garage container.
 	// If not specified, inherits from GarageCluster.
 	// +optional

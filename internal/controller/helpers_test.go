@@ -288,6 +288,105 @@ func TestBuildSecretData(t *testing.T) {
 	}
 }
 
+func TestResolveGarageImage(t *testing.T) {
+	tests := []struct {
+		name            string
+		image           string
+		imageRepository string
+		expected        string
+	}{
+		{
+			name:     "defaults when both empty",
+			expected: defaultGarageImage,
+		},
+		{
+			name:     "image takes precedence",
+			image:    "custom/garage:v1.0.0",
+			expected: "custom/garage:v1.0.0",
+		},
+		{
+			name:            "imageRepository uses default tag",
+			imageRepository: "my-mirror/garage",
+			expected:        "my-mirror/garage:" + defaultGarageTag,
+		},
+		{
+			name:            "image overrides imageRepository",
+			image:           "full/override:latest",
+			imageRepository: "my-mirror/garage",
+			expected:        "full/override:latest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveGarageImage(tt.image, tt.imageRepository)
+			if got != tt.expected {
+				t.Errorf("resolveGarageImage(%q, %q) = %q, want %q", tt.image, tt.imageRepository, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMergeNodeImage(t *testing.T) {
+	tests := []struct {
+		name         string
+		clusterImage string
+		clusterRepo  string
+		nodeImage    string
+		nodeRepo     string
+		expected     string
+	}{
+		{
+			name:     "all empty uses default",
+			expected: defaultGarageImage,
+		},
+		{
+			name:         "cluster image only",
+			clusterImage: "custom/garage:v3.0.0",
+			expected:     "custom/garage:v3.0.0",
+		},
+		{
+			name:        "cluster imageRepository only",
+			clusterRepo: "my-mirror/garage",
+			expected:    "my-mirror/garage:" + defaultGarageTag,
+		},
+		{
+			name:         "node image overrides cluster image",
+			clusterImage: "cluster/garage:v1.0.0",
+			nodeImage:    "node/garage:v2.0.0",
+			expected:     "node/garage:v2.0.0",
+		},
+		{
+			name:         "node imageRepository overrides cluster image",
+			clusterImage: "cluster/garage:v3.0.0",
+			nodeRepo:     "node-mirror/garage",
+			expected:     "node-mirror/garage:" + defaultGarageTag,
+		},
+		{
+			name:        "node imageRepository overrides cluster imageRepository",
+			clusterRepo: "cluster-mirror/garage",
+			nodeRepo:    "node-mirror/garage",
+			expected:    "node-mirror/garage:" + defaultGarageTag,
+		},
+		{
+			name:         "node image wins over everything",
+			clusterImage: "cluster/garage:v1.0.0",
+			clusterRepo:  "cluster-mirror/garage",
+			nodeImage:    "node/garage:latest",
+			nodeRepo:     "node-mirror/garage",
+			expected:     "node/garage:latest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeNodeImage(tt.clusterImage, tt.clusterRepo, tt.nodeImage, tt.nodeRepo)
+			if got != tt.expected {
+				t.Errorf("mergeNodeImage(%q, %q, %q, %q) = %q, want %q",
+					tt.clusterImage, tt.clusterRepo, tt.nodeImage, tt.nodeRepo, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestBuildContainerPorts(t *testing.T) {
 	tests := []struct {
 		name        string

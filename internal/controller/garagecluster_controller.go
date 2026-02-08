@@ -51,6 +51,7 @@ import (
 const (
 	garageClusterFinalizer = "garagecluster.garage.rajsingh.info/finalizer"
 	defaultGarageImage     = "dxflrs/garage:v2.2.0"
+	defaultGarageTag       = "v2.2.0"
 
 	// Health status constants
 	healthStatusHealthy  = "healthy"
@@ -1162,6 +1163,35 @@ func (r *GarageClusterReconciler) reconcileAPIService(ctx context.Context, clust
 	return r.Update(ctx, existing)
 }
 
+// resolveGarageImage determines the container image from image/imageRepository fields.
+// Priority: image > imageRepository + default tag > default image.
+func resolveGarageImage(image, imageRepository string) string {
+	if image != "" {
+		return image
+	}
+	if imageRepository != "" {
+		return imageRepository + ":" + defaultGarageTag
+	}
+	return defaultGarageImage
+}
+
+// mergeNodeImage merges cluster and node image fields, then resolves the final image.
+// If a node sets imageRepository without image, it clears any inherited cluster image
+// so the repo override takes effect.
+func mergeNodeImage(clusterImage, clusterRepo, nodeImage, nodeRepo string) string {
+	img, repo := clusterImage, clusterRepo
+	if nodeImage != "" {
+		img = nodeImage
+	}
+	if nodeRepo != "" {
+		repo = nodeRepo
+		if nodeImage == "" {
+			img = ""
+		}
+	}
+	return resolveGarageImage(img, repo)
+}
+
 // buildContainerPorts returns the container ports for the Garage StatefulSet
 func buildContainerPorts(cluster *garagev1alpha1.GarageCluster) []corev1.ContainerPort {
 	ports := []corev1.ContainerPort{}
@@ -1542,10 +1572,7 @@ func (r *GarageClusterReconciler) reconcileStatefulSet(ctx context.Context, clus
 	log := logf.FromContext(ctx)
 	stsName := cluster.Name
 
-	image := defaultGarageImage
-	if cluster.Spec.Image != "" {
-		image = cluster.Spec.Image
-	}
+	image := resolveGarageImage(cluster.Spec.Image, cluster.Spec.ImageRepository)
 
 	replicas := cluster.Spec.Replicas
 	if replicas == 0 {

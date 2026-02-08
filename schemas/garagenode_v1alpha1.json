@@ -931,6 +931,10 @@
           "description": "Image overrides the Garage container image.\nIf not specified, inherits from GarageCluster.",
           "type": "string"
         },
+        "imageRepository": {
+          "description": "ImageRepository overrides just the repository portion of the Garage image.\nIf not specified, inherits from GarageCluster.\nIgnored if image is set.",
+          "type": "string"
+        },
         "nodeId": {
           "description": "NodeID is the public key of the Garage node.\nIf not specified, the operator will auto-discover from the pod.",
           "type": "string"

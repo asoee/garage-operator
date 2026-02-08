@@ -9,6 +9,8 @@ metadata:
 spec:
   replicas: 3
   image: dxflrs/garage:v2.2.0
+  # Override repo only, keeps default tag for auto-upgrades:
+  # imageRepository: my-mirror/garage
 
   replication:
     factor: 3

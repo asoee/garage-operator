@@ -153,13 +153,7 @@ func (r *GarageNodeReconciler) reconcileStatefulSet(ctx context.Context, node *g
 	stsName := node.Name
 
 	// Build merged pod config (cluster defaults + node overrides)
-	image := defaultGarageImage
-	if cluster.Spec.Image != "" {
-		image = cluster.Spec.Image
-	}
-	if node.Spec.Image != "" {
-		image = node.Spec.Image
-	}
+	image := mergeNodeImage(cluster.Spec.Image, cluster.Spec.ImageRepository, node.Spec.Image, node.Spec.ImageRepository)
 
 	resources := cluster.Spec.Resources
 	if node.Spec.Resources != nil {
