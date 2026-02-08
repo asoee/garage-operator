@@ -1109,6 +1109,12 @@ spec:
                   Image overrides the Garage container image.
                   If not specified, inherits from GarageCluster.
                 type: string
+              imageRepository:
+                description: |-
+                  ImageRepository overrides just the repository portion of the Garage image.
+                  If not specified, inherits from GarageCluster.
+                  Ignored if image is set.
+                type: string
               nodeId:
                 description: |-
                   NodeID is the public key of the Garage node.

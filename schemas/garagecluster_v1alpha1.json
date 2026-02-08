@@ -1436,7 +1436,7 @@
         },
         "image": {
           "default": "dxflrs/garage:v2.2.0",
-          "description": "Image specifies the Garage container image to use",
+          "description": "Image specifies the Garage container image to use.\nTakes precedence over imageRepository if both are set.",
           "type": "string"
         },
         "imagePullPolicy": {
@@ -1460,6 +1460,10 @@
             "additionalProperties": false
           },
           "type": "array"
+        },
+        "imageRepository": {
+          "description": "ImageRepository overrides just the repository portion of the default Garage image,\npreserving the default tag for automatic version upgrades.\nFor example, setting this to \"my-mirror/garage\" with the default tag v2.2.0\nproduces \"my-mirror/garage:v2.2.0\".\nIgnored if image is set.",
+          "type": "string"
         },
         "k2vApi": {
           "description": "K2VAPI configures the K2V (key-value) API endpoint",
