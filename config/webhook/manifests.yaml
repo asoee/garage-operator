@@ -30,12 +30,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-garage-garage-rajsingh-info-v1alpha1-garagecluster
+      path: /mutate-garage-rajsingh-info-v1alpha1-garagecluster
   failurePolicy: Fail
   name: mgaragecluster.kb.io
   rules:
   - apiGroups:
-    - garage.garage.rajsingh.info
+    - garage.rajsingh.info
     apiVersions:
     - v1alpha1
     operations:
@@ -96,12 +96,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-garage-garage-rajsingh-info-v1alpha1-garageadmintoken
+      path: /validate-garage-rajsingh-info-v1alpha1-garageadmintoken
   failurePolicy: Fail
   name: vgarageadmintoken.kb.io
   rules:
   - apiGroups:
-    - garage.garage.rajsingh.info
+    - garage.rajsingh.info
     apiVersions:
     - v1alpha1
     operations:
@@ -136,12 +136,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-garage-garage-rajsingh-info-v1alpha1-garagecluster
+      path: /validate-garage-rajsingh-info-v1alpha1-garagecluster
   failurePolicy: Fail
   name: vgaragecluster.kb.io
   rules:
   - apiGroups:
-    - garage.garage.rajsingh.info
+    - garage.rajsingh.info
     apiVersions:
     - v1alpha1
     operations:

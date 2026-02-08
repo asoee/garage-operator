@@ -34,7 +34,7 @@ func (r *GarageAdminToken) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/validate-garage-garage-rajsingh-info-v1alpha1-garageadmintoken,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.garage.rajsingh.info,resources=garageadmintokens,verbs=create;update,versions=v1alpha1,name=vgarageadmintoken.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-garage-rajsingh-info-v1alpha1-garageadmintoken,mutating=false,failurePolicy=fail,sideEffects=None,groups=garage.rajsingh.info,resources=garageadmintokens,verbs=create;update,versions=v1alpha1,name=vgarageadmintoken.kb.io,admissionReviewVersions=v1
 
 var _ admission.Validator[*GarageAdminToken] = &GarageAdminTokenValidator{}
 
