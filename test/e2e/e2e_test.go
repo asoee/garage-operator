@@ -1558,6 +1558,18 @@ var _ = Describe("Webhooks", Ordered, Label("webhooks"), func() {
 					"Webhook server not started. Logs: %s", output)
 			}
 			Eventually(verifyWebhookServerStarted, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("waiting for cert-manager to inject CA bundle into webhook configurations")
+			verifyCaBundleInjected := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "mutatingwebhookconfiguration",
+					"-l", "app.kubernetes.io/name=garage-operator",
+					"-o", "jsonpath={.items[0].webhooks[0].clientConfig.caBundle}",
+				)
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty(), "CA bundle not yet injected by cert-manager")
+			}
+			Eventually(verifyCaBundleInjected, 2*time.Minute, time.Second).Should(Succeed())
 		})
 
 		It("should return validation warnings for EmptyDir storage", func() {
@@ -1611,14 +1623,21 @@ spec:
     seccompProfile:
       type: RuntimeDefault
 `
-			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(clusterYAML)
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create GarageCluster: %s", output)
+			// Retry creation: the webhook server may still be starting up even after
+			// the pod is Ready (readiness probe checks :8081, not the webhook port).
+			var applyOutput string
+			applyCluster := func(g Gomega) {
+				cmd := exec.Command("kubectl", "apply", "-f", "-")
+				cmd.Stdin = strings.NewReader(clusterYAML)
+				out, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "Failed to create GarageCluster: %s", out)
+				applyOutput = out
+			}
+			Eventually(applyCluster, 2*time.Minute, 5*time.Second).Should(Succeed())
 
 			// Verify webhook returned validation warnings
-			Expect(output).To(ContainSubstring("Warning"),
-				"Expected validation warning from webhook for EmptyDir storage. Output: %s", output)
+			Expect(applyOutput).To(ContainSubstring("Warning"),
+				"Expected validation warning from webhook for EmptyDir storage. Output: %s", applyOutput)
 
 			By("verifying the GarageCluster was created")
 			verifyClusterCreated := func(g Gomega) {
