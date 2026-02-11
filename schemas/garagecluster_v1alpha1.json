@@ -1542,7 +1542,7 @@
               "type": "array"
             },
             "rpcBindAddr": {
-              "description": "RPCBindAddr is a custom bind address for inter-cluster RPC.\nCan be a TCP address (e.g., \"0.0.0.0:3901\", \"[::]:3901\") or\na Unix socket path (e.g., \"unix:///run/garage/rpc.sock\").\nIf set, this overrides RPCBindPort.",
+              "description": "RPCBindAddr is a custom bind address for inter-cluster RPC.\nCan be a TCP address (e.g., \"0.0.0.0:3901\", \"[::]:3901\").\nIf set, this overrides RPCBindPort.",
               "type": "string"
             },
             "rpcBindOutgoing": {

@@ -429,8 +429,7 @@ type NetworkConfig struct {
 	RPCBindPort int32 `json:"rpcBindPort,omitempty"`
 
 	// RPCBindAddr is a custom bind address for inter-cluster RPC.
-	// Can be a TCP address (e.g., "0.0.0.0:3901", "[::]:3901") or
-	// a Unix socket path (e.g., "unix:///run/garage/rpc.sock").
+	// Can be a TCP address (e.g., "0.0.0.0:3901", "[::]:3901").
 	// If set, this overrides RPCBindPort.
 	// +optional
 	RPCBindAddr string `json:"rpcBindAddr,omitempty"`
