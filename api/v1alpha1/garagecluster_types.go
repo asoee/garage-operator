@@ -428,6 +428,13 @@ type NetworkConfig struct {
 	// +kubebuilder:default=3901
 	RPCBindPort int32 `json:"rpcBindPort,omitempty"`
 
+	// RPCBindAddr is a custom bind address for inter-cluster RPC.
+	// Can be a TCP address (e.g., "0.0.0.0:3901", "[::]:3901") or
+	// a Unix socket path (e.g., "unix:///run/garage/rpc.sock").
+	// If set, this overrides RPCBindPort.
+	// +optional
+	RPCBindAddr string `json:"rpcBindAddr,omitempty"`
+
 	// RPCPublicAddr is the external address for other nodes to contact this node
 	// +optional
 	RPCPublicAddr string `json:"rpcPublicAddr,omitempty"`
